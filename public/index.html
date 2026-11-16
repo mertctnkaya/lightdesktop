@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>LightDesktop — HDD Dostu Dosya Gezgini</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=3" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg?v=3" />
+  <link rel="apple-touch-icon" href="/icon-192.png?v=3" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <!-- Üst Sekme Çubuğu -->
+    <header class="tab-strip">
+      <div id="tabs-container" class="tabs-list"></div>
+      <button id="btn-new-tab" class="icon-btn tab-add" title="Yeni Sekme (Ctrl+T)">+</button>
+      <div class="tab-strip-right">
+        <button id="btn-errors-center" class="mini-pill-btn error-pill-btn" title="İşlem Hataları ve logs.txt Kayıtları">⚠️ Hatalar (<span id="error-badge-count">0</span>)</button>
+        <span id="index-pill" class="status-pill" title="SSD SQLite İndeks Durumu (Detay için tıklayın)">
+          <span class="dot"></span>
+          <span id="index-pill-text">İndeks Hazır</span>
+        </span>
+        <button id="btn-toggle-index" class="mini-pill-btn" title="Aktif Sürücüyü Arka Planda Hızlı İndeksle">⚡ İndeksle</button>
+        <button id="btn-install-shortcut" class="mini-pill-btn" title="Masaüstü Kısayolu ve Windows Sağ Tık Menüsü Ekle">📌 Kısayol Kur</button>
+        <button id="btn-settings" class="mini-pill-btn" title="Uygulama Ayarları (Ctrl+,)">⚙️ Ayarlar</button>
+      </div>
+    </header>
+
+    <!-- Gezinti & Arama Çubuğu -->
+    <nav class="nav-bar">
+      <div class="nav-buttons">
+        <button id="btn-back" class="icon-btn" title="Geri (Alt+Sol)" disabled>←</button>
+        <button id="btn-forward" class="icon-btn" title="İleri (Alt+Sağ)" disabled>→</button>
+        <button id="btn-up" class="icon-btn" title="Üst Klasör (Backspace)" disabled>↑</button>
+        <button id="btn-refresh" class="icon-btn" title="Yenile (F5)">↻</button>
+      </div>
+
+      <div id="address-wrapper" class="address-bar">
+        <div id="breadcrumbs" class="breadcrumbs"></div>
+        <input id="address-input" class="address-input hidden" type="text" spellcheck="false" placeholder="Klasör yolu yazın (örn. D:\Videolar)" />
+      </div>
+
+      <div class="search-box">
+        <select id="search-scope" class="search-scope" title="Arama Kapsamı">
+          <option value="folder">Bu Klasör</option>
+          <option value="drive">Bu Disk</option>
+          <option value="all">Tüm İndeks</option>
+        </select>
+        <input id="search-input" type="search" placeholder="Hızlı ara... (Ctrl+F)" spellcheck="false" />
+        <button id="btn-clear-search" class="icon-btn small hidden" title="Aramayı Temizle">✕</button>
+      </div>
+    </nav>
+
+    <!-- Komut Araç Çubuğu -->
+    <div class="command-bar">
+      <div class="cmd-group">
+        <button id="btn-mkdir" class="cmd-btn primary" title="Yeni Klasör (Ctrl+Shift+N)">＋ Yeni</button>
+        <button id="btn-pin" class="cmd-btn" title="Bu Klasörü Sol Menüye Sabitle">📌 Sabitle</button>
+      </div>
+      <div class="cmd-sep"></div>
+      <div class="cmd-group">
+        <button id="btn-cut" class="cmd-btn" title="Kes (Ctrl+X)" disabled>✂️</button>
+        <button id="btn-copy" class="cmd-btn" title="Kopyala (Ctrl+C)" disabled>📋</button>
+        <button id="btn-paste" class="cmd-btn" title="Yapıştır (Ctrl+V)" disabled>📥 Yapıştır</button>
+        <button id="btn-rename" class="cmd-btn" title="Yeniden Adlandır (F2)" disabled>✏️</button>
+        <button id="btn-delete" class="cmd-btn danger-hover" title="Çöpe At (Del / Kalıcı: Shift+Del)" disabled>🗑️</button>
+        <button id="btn-properties" class="cmd-btn" title="Seçili Öğelerin Bilgisi / Özellikler (Alt+Enter)" disabled>ℹ️ Bilgi</button>
+        <button id="btn-undo" class="cmd-btn" title="Son İşlemi Geri Al (Ctrl+Z)" disabled>↩️ Geri Al</button>
+      </div>
+      <div class="cmd-sep"></div>
+      <div class="cmd-group">
+        <label class="cmd-inline-label" title="Sıralama Ölçütü">
+          ↕️
+          <select id="sort-by" class="cmd-select">
+            <option value="name">Ad</option>
+            <option value="mtime">Değiştirme Tarihi</option>
+            <option value="ctime">Oluşturma Tarihi</option>
+            <option value="size">Boyut</option>
+            <option value="ext">Tür / Uzantı</option>
+          </select>
+        </label>
+        <button id="btn-sort-dir" class="cmd-btn" title="Artan / Azalan Sırala">▲</button>
+        <select id="view-mode" class="cmd-select" title="Görünüm Modu">
+          <option value="list">☰ Detaylı Liste</option>
+          <option value="dense">≡ Sıkışık Liste</option>
+          <option value="compact">☷ Kompakt Liste</option>
+          <option value="tiles">▤ Döşemeler (Tiles)</option>
+          <option value="grid-sm">⊞ Küçük Kapaklar</option>
+          <option value="grid">⊞ Orta Kapaklar</option>
+          <option value="grid-lg">⊞ Büyük Kapaklar</option>
+          <option value="grid-xl">🖼️ Çok Büyük Galeri</option>
+        </select>
+      </div>
+      <div class="cmd-sep"></div>
+      <div class="cmd-group">
+        <button id="btn-range-studio" class="cmd-btn accent-outline" title="RegExp, Numara, Tarih ve Boyut Aralığı ile Seçim">🎯 Aralık &amp; Filtre</button>
+        <label class="cmd-inline-label thumb-control" title="HDD Korumalı Kapak Resmi Modu">
+          🖼️
+          <select id="thumb-mode" class="cmd-select">
+            <option value="off">Kapaklar: Kapalı (0 Yük)</option>
+            <option value="selected">Kapaklar: Sadece Seçililer</option>
+            <option value="viewport">Kapaklar: Ekrandakiler (Sıralı)</option>
+            <option value="all">Kapaklar: Tüm Klasör (Sıralı)</option>
+          </select>
+        </label>
+        <button id="btn-stop-thumbs" class="cmd-btn danger-hover hidden" title="Kapak Kuyruğunu Durdur">⏹ <span id="thumb-queue-count">0</span></button>
+      </div>
+      <div class="cmd-spacer"></div>
+      <div class="cmd-group">
+        <button id="btn-folder-sizes" class="cmd-btn" title="Klasörlerin Toplam Boyutunu Sıralı Hesapla">📏 Boyutlar</button>
+        <button id="btn-organize-date" class="cmd-btn" title="Dosyaları Yıl/Ay Klasörlerine Otomatik Ayır">📅 Tarihle Klasörle</button>
+        <button id="btn-dual-pane" class="cmd-btn accent-outline" title="Çift Panel Görünümü (F3)">◫ Çift Panel (F3)</button>
+        <button id="btn-analyze" class="cmd-btn" title="Neler Dolduruyor? Disk &amp; Klasör Analizi">📊 Analiz</button>
+        <button id="btn-basket" class="cmd-btn" title="Çoklu Klasör Toplama Sepeti (B)">🧺 Sepet (<span id="basket-count">0</span>)</button>
+        <button id="btn-open-trash" class="cmd-btn" title="Çöp Kutusunu Görüntüle">🗑️ Çöp (<span id="cmd-trash-count">0</span>)</button>
+      </div>
+    </div>
+
+    <!-- Ana Gövde (Sağ Ayrıntılar Paneli YOK) -->
+    <div class="workspace">
+      <!-- Sol Gezinti Paneli -->
+      <aside class="sidebar">
+        <div class="sidebar-scroll">
+          <div class="sidebar-section">
+            <div class="sidebar-item active" data-path="PC">
+              <span class="sb-icon">🖥️</span>
+              <span>Bu bilgisayar</span>
+            </div>
+            <div class="sidebar-item" id="sb-trash-btn" data-path="TRASH">
+              <span class="sb-icon">🗑️</span>
+              <span class="sb-label">Çöp Kutusu</span>
+              <span id="sb-trash-badge" class="sb-trash-badge hidden">0</span>
+            </div>
+          </div>
+
+          <div class="sidebar-section">
+            <div class="sidebar-title">Hızlı Erişim</div>
+            <div id="quick-access-list"></div>
+          </div>
+
+          <div class="sidebar-section">
+            <div class="sidebar-title">Sabitlenenler</div>
+            <div id="pins-list"></div>
+          </div>
+
+          <div class="sidebar-section">
+            <div class="sidebar-title">Cihazlar ve Sürücüler</div>
+            <div id="sidebar-drives-list"></div>
+          </div>
+        </div>
+
+        <div id="sidebar-tasks-panel" class="sidebar-tasks-panel">
+          <div class="sidebar-tasks-head">
+            <span>⚙️ Devam Eden İşlemler</span>
+            <span id="sidebar-tasks-count" class="sidebar-tasks-count">0</span>
+          </div>
+          <div id="sidebar-tasks-list" class="sidebar-tasks-list">
+            <div class="sidebar-tasks-empty">Aktif işlem yok</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Orta İçerik Alanı -->
+      <main class="main-pane">
+        <!-- Gelişmiş Filtre & Aralık Seçim Stüdyosu (Açılır Çekmece) -->
+        <section id="range-studio" class="range-studio hidden">
+          <div class="studio-header">
+            <strong>🎯 Gelişmiş Filtre &amp; Aralık Seçim Stüdyosu</strong>
+            <div class="studio-presets">
+              <button class="chip-btn" data-preset="img">IMG_*</button>
+              <button class="chip-btn" data-preset="vid">VID_*</button>
+              <button class="chip-btn" data-preset="bigvid">Videolar &gt;100MB</button>
+              <button class="chip-btn" data-preset="dupes">Kopya (1)(2)</button>
+              <button class="chip-btn" data-preset="today">Bugün</button>
+              <button class="chip-btn" data-preset="reset">Temizle</button>
+            </div>
+            <button id="btn-close-studio" class="icon-btn small">✕</button>
+          </div>
+          <div class="studio-grid">
+            <div class="studio-field">
+              <label>İsim / Joker / RegExp</label>
+              <div class="inline-flex">
+                <input id="flt-pattern" type="text" placeholder="örn: ^IMG_2023.* veya *.mp4" spellcheck="false" />
+                <label class="chk-pill"><input id="flt-regex" type="checkbox" /> RegExp</label>
+              </div>
+            </div>
+            <div class="studio-field">
+              <label>Dosya Adındaki Numara Aralığı</label>
+              <div class="inline-flex">
+                <input id="flt-num-min" type="number" placeholder="Başlangıç (örn. 1050)" />
+                <span>–</span>
+                <input id="flt-num-max" type="number" placeholder="Bitiş (örn. 1420)" />
+              </div>
+            </div>
+            <div class="studio-field">
+              <label>Tarih Aralığı (Değiştirme)</label>
+              <div class="inline-flex">
+                <input id="flt-date-min" type="date" />
+                <span>–</span>
+                <input id="flt-date-max" type="date" />
+              </div>
+            </div>
+            <div class="studio-field">
+              <label>Boyut Aralığı</label>
+              <div class="inline-flex">
+                <input id="flt-size-min" type="number" min="0" placeholder="Min" style="width:76px" />
+                <select id="flt-size-min-unit">
+                  <option value="1024">KB</option>
+                  <option value="1048576" selected>MB</option>
+                  <option value="1073741824">GB</option>
+                </select>
+                <span>–</span>
+                <input id="flt-size-max" type="number" min="0" placeholder="Max" style="width:76px" />
+                <select id="flt-size-max-unit">
+                  <option value="1024">KB</option>
+                  <option value="1048576" selected>MB</option>
+                  <option value="1073741824">GB</option>
+                </select>
+              </div>
+            </div>
+            <div class="studio-field">
+              <label>Kategori &amp; Uzantı</label>
+              <div class="inline-flex">
+                <select id="flt-category">
+                  <option value="all">Tüm Türler</option>
+                  <option value="video">🎬 Videolar</option>
+                  <option value="image">🖼️ Fotoğraflar</option>
+                  <option value="archive">📦 Arşivler</option>
+                  <option value="document">📄 Belgeler</option>
+                  <option value="audio">🎵 Ses</option>
+                  <option value="folder">📁 Sadece Klasörler</option>
+                </select>
+                <input id="flt-ext" type="text" placeholder="Uzantı (.mp4,.jpg)" style="width:130px" />
+              </div>
+            </div>
+            <div class="studio-field">
+              <label>Satır Sırası Aralığı</label>
+              <div class="inline-flex">
+                <input id="flt-row-min" type="number" min="1" placeholder="1. satır" />
+                <span>–</span>
+                <input id="flt-row-max" type="number" min="1" placeholder="500. satır" />
+              </div>
+            </div>
+          </div>
+          <div class="studio-footer">
+            <span id="studio-match-summary" class="studio-summary">Filtre uygulanmadı</span>
+            <div class="studio-actions">
+              <button id="btn-flt-select" class="cmd-btn primary">✓ Eşleşenleri Seç</button>
+              <button id="btn-flt-filter-view" class="cmd-btn">🔍 Sadece Eşleşenleri Göster</button>
+              <button id="btn-flt-clear-view" class="cmd-btn hidden">Tümünü Göster</button>
+              <button id="btn-flt-basket" class="cmd-btn">🧺 Sepete At</button>
+              <button id="btn-flt-move-folder" class="cmd-btn">📁 Yeni Klasöre Taşı</button>
+              <button id="btn-flt-copy" class="cmd-btn">📋 Kopyala</button>
+              <button id="btn-flt-delete" class="cmd-btn danger-hover">🗑️ Sil</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- "Bu Bilgisayar" Dashboard Görünümü -->
+        <section id="pc-dashboard" class="pc-dashboard hidden">
+          <div class="section-heading">Cihazlar ve sürücüler</div>
+          <div id="drives-grid" class="drives-grid"></div>
+
+          <div class="dash-section" data-dash-sec="quick">
+            <div class="dash-sec-head">
+              <button type="button" id="btn-toggle-sec-quick" class="dash-toggle-btn" aria-expanded="true">
+                <span class="dash-chevron">▾</span>
+                <span>⚡ Hızlı Erişim Kısayolları</span>
+                <span id="cnt-sec-quick" class="dash-count">0</span>
+              </button>
+            </div>
+            <div id="quick-cards-grid" class="quick-cards-grid"></div>
+          </div>
+
+          <div class="dash-section" data-dash-sec="folders">
+            <div class="dash-sec-head">
+              <button type="button" id="btn-toggle-sec-folders" class="dash-toggle-btn" aria-expanded="true">
+                <span class="dash-chevron">▾</span>
+                <span>📂 Son Açılan Klasörler</span>
+                <span id="cnt-sec-folders" class="dash-count">0</span>
+              </button>
+              <div class="dash-sec-actions">
+                <button type="button" id="btn-clear-recent-folders" class="mini-pill-btn">🧹 Temizle</button>
+              </div>
+            </div>
+            <div id="recent-folders-grid" class="recent-cards-grid"></div>
+          </div>
+
+          <div class="dash-section" data-dash-sec="files">
+            <div class="dash-sec-head">
+              <button type="button" id="btn-toggle-sec-files" class="dash-toggle-btn" aria-expanded="true">
+                <span class="dash-chevron">▾</span>
+                <span>📄 Son Erişilen Dosyalar</span>
+                <span id="cnt-sec-files" class="dash-count">0</span>
+              </button>
+              <div class="dash-sec-actions">
+                <button type="button" id="btn-clear-recent-files" class="mini-pill-btn">🧹 Temizle</button>
+              </div>
+            </div>
+            <div id="recent-files-grid" class="recent-cards-grid"></div>
+          </div>
+        </section>
+
+        <!-- Disk / Klasör Kategori Analizi Görünümü -->
+        <section id="analyzer-view" class="analyzer-view hidden">
+          <div class="analyzer-header">
+            <div>
+              <h2 id="analyzer-title">Disk Analizi</h2>
+              <span id="analyzer-subtitle" class="muted-text"></span>
+            </div>
+            <div class="analyzer-header-actions">
+              <button id="btn-analyzer-dupes" class="cmd-btn accent-outline">🧬 Kopya Dosyaları Bul</button>
+              <button id="btn-analyzer-live" class="cmd-btn primary">🔄 Canlı Tara &amp; Güncelle</button>
+              <button id="btn-analyzer-close" class="cmd-btn">✕ Listeye Dön</button>
+            </div>
+          </div>
+          <div id="analyzer-loading" class="analyzer-loading hidden">
+            <div class="spinner"></div>
+            <span>Disk yorulmadan sıralı olarak taranıyor...</span>
+          </div>
+          <div id="analyzer-content">
+            <div id="stacked-bar" class="stacked-bar"></div>
+            <div id="category-cards" class="category-cards"></div>
+            <div id="dupes-panel" class="analyzer-panel hidden" style="margin-bottom:14px;"></div>
+            <div class="analyzer-tables">
+              <div class="analyzer-panel">
+                <h3>🐋 En Büyük 100 Dosya</h3>
+                <div id="top-files-list" class="analyzer-list"></div>
+              </div>
+              <div class="analyzer-panel">
+                <h3>📂 En Büyük Alt Klasörler</h3>
+                <div id="top-folders-list" class="analyzer-list"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Dosya Listesi / Sanal Liste -->
+        <section id="explorer-view" class="explorer-view">
+          <div id="trash-bar" class="trash-bar hidden">
+            <div class="trash-bar-info">
+              <strong>🗑️ Çöp Kutusu</strong>
+              <span id="trash-bar-summary" class="muted-text">Çöpe atılanlar buradan kalıcı silinmedikçe veya Shift+Del kullanılmadıkça kalıcı silinmez.</span>
+            </div>
+            <div class="trash-bar-actions">
+              <button id="btn-trash-restore" class="cmd-btn primary" disabled>♻️ Seçilenleri Geri Yükle</button>
+              <button id="btn-trash-perm-delete" class="cmd-btn danger-hover" disabled>🔥 Kalıcı Sil</button>
+              <button id="btn-trash-empty" class="cmd-btn danger-hover">🧹 Çöp Kutusunu Boşalt</button>
+            </div>
+          </div>
+          <div id="list-header" class="list-header">
+            <div class="lh-cell lh-chk"><input id="chk-select-all" type="checkbox" title="Tümünü Seç" /></div>
+            <div class="lh-cell lh-name" data-sort="name">Ad</div>
+            <div class="lh-cell lh-date" data-sort="mtime">Değiştirme tarihi</div>
+            <div class="lh-cell lh-type" data-sort="ext">Tür</div>
+            <div class="lh-cell lh-size" data-sort="size">Boyut</div>
+            <div class="lh-cell lh-eye" title="Tekil Kapak Yükle">👁️</div>
+          </div>
+          <div id="virtual-viewport" class="virtual-viewport" tabindex="0">
+            <div id="virtual-spacer" class="virtual-spacer">
+              <div id="virtual-content" class="virtual-content"></div>
+              <div id="marquee-box" class="marquee-box hidden"></div>
+            </div>
+            <div id="empty-state" class="empty-state hidden">Bu klasör boş veya filtreyle eşleşen öğe yok.</div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Çift Ekran / Hedef Panel (F3) -->
+      <aside id="dual-pane" class="dual-pane hidden">
+        <div class="dual-header">
+          <button id="dual-btn-back" class="icon-btn small" title="Geri">←</button>
+          <button id="dual-btn-up" class="icon-btn small" title="Üst Klasör">↑</button>
+          <button id="dual-btn-refresh" class="icon-btn small" title="Yenile">↻</button>
+          <input id="dual-path-input" type="text" spellcheck="false" placeholder="Hedef yol (örn. E:\Arsiv)" />
+          <select id="dual-quick-select" title="Hızlı Hedef Seç"></select>
+          <button id="btn-close-dual" class="icon-btn small" title="Çift Paneli Kapat (F3)">✕</button>
+        </div>
+        <div class="dual-toolbar">
+          <button id="dual-btn-move-here" class="cmd-btn primary">➡ Seçilileri Taşı</button>
+          <button id="dual-btn-copy-here" class="cmd-btn">📋 Kopyala</button>
+          <button id="dual-btn-basket-move-here" class="cmd-btn accent-outline" title="Sepetteki tüm öğeleri sağ paneldeki klasöre taşı" disabled>🧺 Sepeti Taşı (<span id="dual-basket-count">0</span>)</button>
+          <button id="dual-btn-mkdir" class="cmd-btn">＋ Klasör</button>
+        </div>
+        <div id="dual-list" class="dual-list"></div>
+      </aside>
+
+      <!-- Klasör Sepeti (Drop Basket) Çekmecesi -->
+      <aside id="basket-drawer" class="basket-drawer hidden">
+        <div class="drawer-header">
+          <strong>🧺 Toplama Sepeti</strong>
+          <button id="btn-close-basket" class="icon-btn small">✕</button>
+        </div>
+        <div class="basket-hint">Farklı klasörlerden seçtiğiniz dosyaları <code>B</code> tuşuyla buraya biriktirip ana panele veya sağ yan panele taşıyabilirsiniz.</div>
+        <div id="basket-list" class="basket-list"></div>
+        <div class="basket-footer">
+          <button id="btn-basket-move-here" class="cmd-btn primary" style="width:100%">📥 Ana Panele Taşı</button>
+          <button id="btn-basket-move-dual" class="cmd-btn accent-outline hidden" style="width:100%;margin-top:6px;">➡ Sağ Panele Taşı</button>
+          <div class="inline-flex" style="margin-top:6px;">
+            <button id="btn-basket-copy-here" class="cmd-btn" style="flex:1">📋 Ana Panele Kopyala</button>
+            <button id="btn-basket-copy-dual" class="cmd-btn hidden" style="flex:1">📋 Sağ Panele</button>
+            <button id="btn-basket-clear" class="cmd-btn danger-hover">Temizle</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Alt Durum Çubuğu & Transfer Kuyruğu -->
+    <footer class="status-bar">
+      <div class="status-left">
+        <span id="status-count">0 öğe</span>
+        <span class="status-sep">|</span>
+        <span id="status-selected">0 seçili</span>
+        <span class="status-sep">|</span>
+        <span id="status-timing">0 ms</span>
+      </div>
+      <div id="transfer-pill" class="transfer-pill hidden">
+        <span id="transfer-label">Kopyalanıyor...</span>
+        <div class="transfer-mini-bar"><div id="transfer-mini-fill" class="transfer-mini-fill"></div></div>
+        <span id="transfer-speed">0 MB/s</span>
+        <button id="btn-transfer-pause" class="mini-pill-btn">⏸</button>
+        <button id="btn-transfer-cancel" class="mini-pill-btn danger">✕</button>
+      </div>
+      <div class="status-right">
+        <span id="cache-badge" title="Önbellek hızlı SSD üzerinde tutuluyor">🛡️ SSD Önbellek Aktif</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Sağ Tık Menüsü -->
+  <div id="context-menu" class="context-menu hidden" popover="manual"></div>
+
+  <!-- Space QuickLook Önizleme Modalı -->
+  <dialog id="quicklook-dialog" class="modal-dialog quicklook-dialog" closedby="any" aria-labelledby="ql-filename">
+    <div class="ql-header">
+      <div class="ql-title">
+        <strong id="ql-filename">Dosya</strong>
+        <span id="ql-meta" class="muted-text"></span>
+      </div>
+      <div class="ql-controls">
+        <button id="btn-ql-basket" class="cmd-btn" title="Sepete Ekle ve Sonrakine Geç (B)">🧺 Sepete (B)</button>
+        <button id="btn-ql-delete" class="cmd-btn danger-hover" title="Çöpe At ve Sonrakine Geç (Del)">🗑️ Sil (Del)</button>
+        <div class="cmd-sep"></div>
+        <button id="btn-ql-zoom-out" class="cmd-btn" title="Uzaklaştır (-)">🔍−</button>
+        <button id="btn-ql-zoom-reset" class="cmd-btn" title="Yakınlaştırmayı Sıfırla (0)">100%</button>
+        <button id="btn-ql-zoom-in" class="cmd-btn" title="Yakınlaştır (+)">🔍+</button>
+        <div class="cmd-sep"></div>
+        <div class="ql-bright-wrap" title="Parlaklık (%30 – %200)">
+          <span>☀️</span>
+          <input type="range" id="ql-brightness-range" min="30" max="200" step="5" value="100" aria-label="Parlaklık" />
+          <button type="button" id="btn-ql-bright-reset" class="cmd-btn" title="Parlaklığı Sıfırla (%100)">100%</button>
+        </div>
+        <div class="cmd-sep"></div>
+        <button id="btn-ql-prev" class="cmd-btn">◀ Önceki</button>
+        <button id="btn-ql-next" class="cmd-btn">Sonraki ▶</button>
+        <button id="btn-ql-reveal" class="cmd-btn" title="Dosyanın Bulunduğu Klasörü Aç">📂 Bulunduğu Yeri Aç</button>
+        <button id="btn-ql-open-ext" class="cmd-btn primary">Varsayılan Uygulamada Aç</button>
+        <button id="btn-ql-close" class="icon-btn">✕</button>
+      </div>
+    </div>
+    <div class="ql-stage-wrap">
+      <button type="button" id="btn-ql-stage-prev" class="ql-nav-btn prev" title="Önceki (←)" aria-label="Önceki">‹</button>
+      <div id="ql-stage" class="ql-stage"></div>
+      <div id="ql-basket-badge" class="ql-basket-badge hidden" title="Bu öğe sepette">🧺 <span class="basket-check">✓</span> Sepette</div>
+      <button type="button" id="btn-ql-stage-next" class="ql-nav-btn next" title="Sonraki (→)" aria-label="Sonraki">›</button>
+    </div>
+  </dialog>
+
+  <!-- Genel İşlem / Toplu Yeniden Adlandırma Modalı -->
+  <dialog id="prompt-dialog" class="modal-dialog prompt-dialog" closedby="any" aria-labelledby="prompt-title">
+    <form method="dialog" id="prompt-form">
+      <h3 id="prompt-title">İşlem</h3>
+      <p id="prompt-desc" class="muted-text"></p>
+      <div id="prompt-fields"></div>
+      <div class="prompt-buttons">
+        <button type="button" id="btn-prompt-cancel" class="cmd-btn">İptal</button>
+        <button type="submit" id="btn-prompt-ok" class="cmd-btn primary">Onayla</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Windows Tarzı İşlem İlerleme Penceresi -->
+  <div id="process-modal" class="process-modal-overlay hidden" role="dialog" aria-labelledby="proc-title">
+    <div class="process-modal">
+      <div class="proc-header">
+        <div class="proc-title-wrap">
+          <span id="proc-op-icon" class="proc-op-icon">⚙️</span>
+          <strong id="proc-title">İşlem Yürütülüyor</strong>
+        </div>
+        <div class="proc-header-btns">
+          <button id="btn-proc-minimize" class="cmd-btn small" title="Arka Plana Al">🗕 Arka Plana Al</button>
+          <button id="btn-proc-close" class="icon-btn small" title="Kapat / Arka Plana Al">✕</button>
+        </div>
+      </div>
+
+      <div class="proc-body">
+        <div class="proc-top-stats">
+          <span id="proc-pct" class="proc-pct">%0</span>
+          <span id="proc-rate-eta" class="proc-rate-eta">Hazırlanıyor...</span>
+        </div>
+
+        <div class="proc-bar-track">
+          <div id="proc-bar-fill" class="proc-bar-fill"></div>
+        </div>
+
+        <div class="proc-summary">
+          <div class="proc-summary-row">
+            <span class="proc-lbl">İlerleme:</span>
+            <span id="proc-count" class="proc-val">0 / 0</span>
+            <span id="proc-err-inline" class="proc-err-inline hidden"></span>
+          </div>
+          <div class="proc-summary-row">
+            <span class="proc-lbl">İşlenen:</span>
+            <span id="proc-current" class="proc-val">—</span>
+          </div>
+          <div class="proc-summary-row">
+            <span class="proc-lbl">Konum:</span>
+            <span id="proc-target" class="proc-val muted-text">—</span>
+          </div>
+        </div>
+
+        <div class="proc-actions-row">
+          <button id="btn-proc-details" class="cmd-btn">⌄ Ayrıntılı Liste</button>
+          <div class="proc-actions-right">
+            <button id="btn-proc-open-errors" class="cmd-btn danger-hover hidden">⚠️ Hatalara Bak</button>
+            <button id="btn-proc-pause" class="cmd-btn">⏸ Duraklat</button>
+            <button id="btn-proc-cancel" class="cmd-btn danger-hover">⏹ İptal Et</button>
+            <button id="btn-proc-done" class="cmd-btn primary hidden">✓ Tamam</button>
+          </div>
+        </div>
+
+        <div id="proc-details-box" class="proc-details-box hidden">
+          <div id="proc-queue-summary" class="proc-queue-summary hidden"></div>
+          <div class="proc-log-head">Son İşlenen Dosyalar (Canlı Akış)</div>
+          <div id="proc-log-list" class="proc-log-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Arka Plan İşlem Dock Kartı (Arka Plana Alınınca Sağ Altta Görünür) -->
+  <div id="process-dock" class="process-dock hidden">
+    <div class="dock-head">
+      <div class="dock-title-wrap">
+        <span id="dock-icon">⚙️</span>
+        <strong id="dock-title">İşlem sürüyor...</strong>
+      </div>
+      <div class="dock-btns">
+        <button id="btn-dock-pause" class="mini-pill-btn" title="Duraklat / Devam Et">⏸</button>
+        <button id="btn-dock-cancel" class="mini-pill-btn danger" title="İptal Et">✕</button>
+        <button id="btn-dock-expand" class="mini-pill-btn" title="Ayrıntılı Pencereyi Aç">🗖 Detay</button>
+      </div>
+    </div>
+    <div class="dock-bar-track"><div id="dock-bar-fill" class="dock-bar-fill"></div></div>
+    <div class="dock-meta">
+      <span id="dock-current" class="dock-current">—</span>
+      <span id="dock-stats" class="dock-stats">0%</span>
+    </div>
+  </div>
+
+  <!-- Hatalar ve logs.txt Merkezi Modalı -->
+  <dialog id="errors-dialog" class="modal-dialog errors-dialog" closedby="any" aria-labelledby="errors-dialog-title">
+    <div class="errors-dialog-head">
+      <div>
+        <strong id="errors-dialog-title">⚠️ İşlem Hataları ve Günlük (logs.txt)</strong>
+        <div id="errors-dialog-sub" class="muted-text" style="font-size:11.5px;"></div>
+      </div>
+      <div class="errors-dialog-actions">
+        <button id="btn-err-refresh" class="cmd-btn">🔄 Yenile</button>
+        <button id="btn-err-open-file" class="cmd-btn">📂 logs.txt Aç</button>
+        <button id="btn-err-diag-copy" class="cmd-btn accent-btn" title="Geliştiriciye göndermek için sistem + hata + log raporunu kopyala">🩺 Teşhis Raporu Kopyala</button>
+        <button id="btn-err-copy" class="cmd-btn">📋 Logu Kopyala</button>
+        <button id="btn-err-clear" class="cmd-btn danger-hover">🧹 Listeyi Temizle</button>
+        <button id="btn-err-close" class="icon-btn">✕</button>
+      </div>
+    </div>
+    <div class="errors-dialog-body">
+      <div id="diag-env-line" class="diag-env-bar">Ortam bilgisi yükleniyor...</div>
+      <div class="errors-section-title">Yakalanan İşlem Hataları</div>
+      <div id="errors-list" class="errors-list"></div>
+      <div class="errors-section-title" style="margin-top:12px;">logs.txt (Son Kayıtlar)</div>
+      <pre id="errors-logs-tail" class="errors-logs-tail"></pre>
+    </div>
+  </dialog>
+
+  <!-- Dosya / Seçim Özellikleri & Toplam Boyut Modalı -->
+  <dialog id="properties-dialog" class="modal-dialog properties-dialog" closedby="any" aria-labelledby="props-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span id="props-icon" class="props-icon">ℹ️</span>
+        <div>
+          <strong id="props-title">Özellikler</strong>
+          <div id="props-subtitle" class="muted-text"></div>
+        </div>
+      </div>
+      <button type="button" id="btn-props-close" class="icon-btn">✕</button>
+    </div>
+    <div id="props-body" class="props-body"></div>
+    <div class="props-footer">
+      <div class="props-footer-left">
+        <button type="button" id="btn-props-copy-path" class="cmd-btn">🔗 Yolu Kopyala</button>
+        <button type="button" id="btn-props-reveal" class="cmd-btn">📂 Bulunduğu Yeri Aç</button>
+      </div>
+      <button type="button" id="btn-props-ok" class="cmd-btn primary">Tamam</button>
+    </div>
+  </dialog>
+
+  <!-- Uygulama Ayarları Modalı -->
+  <dialog id="settings-dialog" class="modal-dialog settings-dialog" closedby="any" aria-labelledby="settings-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span class="props-icon">⚙️</span>
+        <div>
+          <strong id="settings-title">Uygulama Ayarları</strong>
+          <div class="muted-text">Tüm değişiklikler anında uygulanır ve tarayıcı belleğine kaydedilir.</div>
+        </div>
+      </div>
+      <button type="button" id="btn-settings-close" class="icon-btn">✕</button>
+    </div>
+
+    <div class="settings-body">
+      <div class="settings-group">
+        <div class="settings-group-title">🎨 Görünüm &amp; Tema</div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Vurgu Rengi</strong>
+            <span class="muted-text">Seçim çerçevesi, aktif butonlar ve ilerleme çubuğu rengi</span>
+          </div>
+          <div id="set-accent-swatches" class="color-swatches">
+            <button type="button" class="color-swatch" data-color="#0078d4" style="background:#0078d4" title="Windows Mavi"></button>
+            <button type="button" class="color-swatch" data-color="#10893e" style="background:#10893e" title="Zümrüt Yeşili"></button>
+            <button type="button" class="color-swatch" data-color="#8764b8" style="background:#8764b8" title="Mor"></button>
+            <button type="button" class="color-swatch" data-color="#ca5010" style="background:#ca5010" title="Kehribar"></button>
+            <button type="button" class="color-swatch" data-color="#00b7c3" style="background:#00b7c3" title="Camgöbeği"></button>
+            <button type="button" class="color-swatch" data-color="#e3008c" style="background:#e3008c" title="Mercan"></button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Yazı Boyutu</strong>
+            <span class="muted-text">Arayüz genel metin boyutu</span>
+          </div>
+          <select id="set-font-size">
+            <option value="12">Küçük (12 px)</option>
+            <option value="13">Varsayılan (13 px)</option>
+            <option value="14">Büyük (14 px)</option>
+            <option value="15">Çok Büyük (15 px)</option>
+          </select>
+        </div>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Klasörleri her zaman en üstte sırala</strong>
+            <span class="muted-text">Kapalıysa klasörler ve dosyalar seçili sıraya göre karışık listelenir</span>
+          </div>
+          <input type="checkbox" id="set-folders-first" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Dosya uzantılarını göster (.jpg, .mp4, .txt)</strong>
+            <span class="muted-text">Kapatıldığında listede yalnızca dosya adı görünür</span>
+          </div>
+          <input type="checkbox" id="set-show-ext" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Kompakt (sıkışık) sol menü</strong>
+            <span class="muted-text">Sol gezinti panelindeki satır boşluklarını daraltır</span>
+          </div>
+          <input type="checkbox" id="set-compact-sidebar" />
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">⚡ Davranış &amp; Gezinti</div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Açılışta Başlangıç Konumu</strong>
+            <span class="muted-text">Yeni pencerede ilk açılacak yer</span>
+          </div>
+          <select id="set-startup-mode">
+            <option value="pc">🖥️ Bu bilgisayar</option>
+            <option value="last">🕒 Son kaldığım klasör</option>
+            <option value="custom">📂 Özel klasör yolu</option>
+          </select>
+        </div>
+        <div id="set-startup-custom-row" class="settings-row hidden">
+          <div class="settings-label-wrap">
+            <strong>Özel Başlangıç Yolu</strong>
+            <span class="muted-text">Örn: D:\Videolar veya C:\Users\mrtcn\Desktop</span>
+          </div>
+          <input type="text" id="set-startup-path" spellcheck="false" style="width:240px" placeholder="D:\" />
+        </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Öğe Açma Modu</strong>
+            <span class="muted-text">Dosya ve klasörlere tıklama davranışı</span>
+          </div>
+          <select id="set-click-mode">
+            <option value="double">Çift Tıkla Aç (Varsayılan)</option>
+            <option value="single">Tek Tıkla Aç</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Çöp Kutusuna Taşıma Onayı</strong>
+            <span class="muted-text">Normal Del tuşuyla çöpe atarken ne zaman onay istensin?</span>
+          </div>
+          <select id="set-trash-confirm">
+            <option value="bulk">Sadece &gt;50 öğede sor (Hızlı)</option>
+            <option value="always">Her zaman onay sor</option>
+            <option value="never">Hiç sorma (Anında çöpe at)</option>
+          </select>
+        </div>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Hatasız biten transfer penceresini otomatik kapat</strong>
+            <span class="muted-text">Taşıma / kopyalama %100 tamamlanınca pencere kendiliğinden kapanır</span>
+          </div>
+          <input type="checkbox" id="set-auto-close-proc" />
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">🎬 Medya, Önizleme &amp; HDD Koruması</div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Varsayılan Kapak Resmi (Thumbnail) Modu</strong>
+            <span class="muted-text">HDD sağlığı için açılışta seçilecek kapak yükleme modu</span>
+          </div>
+          <select id="set-default-thumb">
+            <option value="off">Kapalı (0 Yük)</option>
+            <option value="selected">Sadece Seçililer</option>
+            <option value="viewport">Ekrandakiler (Sıralı)</option>
+            <option value="all">Tüm Klasör (Sıralı)</option>
+          </select>
+        </div>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>QuickLook'ta videoları otomatik oynat</strong>
+            <span class="muted-text">Space veya çift tıkla açılan video hemen başlar</span>
+          </div>
+          <input type="checkbox" id="set-video-autoplay" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>QuickLook'ta videoları döngüye al (Loop)</strong>
+            <span class="muted-text">Kısa videolar bitince otomatik başa sarar</span>
+          </div>
+          <input type="checkbox" id="set-video-loop" />
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">🛡️ Önbellek, Kısayol &amp; Bakım</div>
+        <div id="settings-cache-stats" class="settings-cache-box">Yükleniyor...</div>
+        <div class="settings-actions-grid">
+          <button type="button" id="btn-set-clear-thumbs" class="cmd-btn">🖼️ Kapak Önbelleğini Temizle</button>
+          <button type="button" id="btn-set-clear-recents" class="cmd-btn">🧹 Son Klasör &amp; Dosya Geçmişini Sil</button>
+          <button type="button" id="btn-set-update-shortcut" class="cmd-btn">📌 Masaüstü Kısayolunu &amp; İkonu Kur</button>
+          <button type="button" id="btn-set-reset-defaults" class="cmd-btn danger-hover">🔄 Ayarları Varsayılana Sıfırla</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="props-footer">
+      <span class="muted-text" style="font-size:11.5px;">Kısayol: <code>Ctrl + ,</code></span>
+      <button type="button" id="btn-settings-done" class="cmd-btn primary">✓ Tamam</button>
+    </div>
+  </dialog>
+
+  <div id="toast-container" class="toast-container"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

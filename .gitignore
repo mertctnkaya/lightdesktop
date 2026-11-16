@@ -1,0 +1,10 @@
+# Build & dağıtım çıktıları (GitHub Releases üzerinden paylaşılır)
+.build-tools/
+dist/
+
+# Yerel çalışma ve günlük dosyaları
+logs.txt
+logs.txt.prev
+server-error.log
+*.tmp
+node_modules/
