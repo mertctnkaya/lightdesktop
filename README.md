@@ -2,6 +2,8 @@
 
 > **Eski ve büyük sabit disklerde (HDD) ve tüm disklerde donmayan, fotoğraf ve videoları saniyeler içinde ayıklamanızı sağlayan hızlı ve hafif Windows 10 / 11 dosya gezgini.**
 
+[![LightDesktop.exe İndir](https://img.shields.io/badge/%E2%AC%87%EF%B8%8F_LightDesktop.exe_%C4%B0ndir-Son_S%C3%BCr%C3%BCm_Windows_x64-0078d4?style=for-the-badge)](https://github.com/mertctnkaya/lightdesktop/releases/latest/download/LightDesktop.exe) [![Tüm Sürümler](https://img.shields.io/badge/%F0%9F%93%A6_T%C3%BCm_S%C3%BCr%C3%BCmler-Releases-2b2d31?style=for-the-badge)](https://github.com/mertctnkaya/lightdesktop/releases/latest)
+
 Klasik Windows Dosya Gezgini, binlerce fotoğraf veya videonun bulunduğu büyük disklerde her dosyayı aynı anda okumaya çalıştığı için sık sık kilitlenir, "Yanıt Vermiyor" hatası verir veya yavaşlar. **LightDesktop**, diski yormadan yalnızca ekranda gördüğünüz kadarını okuyarak bu sorunu tamamen ortadan kaldırır; günlük dosya düzenleme, fotoğraf/video eleme ve disk temizliği işlerinizi tek bir pencerede hızlandırır.
 
 ---
@@ -12,7 +14,7 @@ Klasik Windows Dosya Gezgini, binlerce fotoğraf veya videonun bulunduğu büyü
 
 Hiçbir ek program yüklemeden doğrudan kullanmak için:
 
-1. Sağ taraftaki **Releases (Sürümler)** bölümünden en güncel **`LightDesktop.exe`** dosyasını indirin.
+1. Doğrudan **[LightDesktop.exe (Son Sürüm)](https://github.com/mertctnkaya/lightdesktop/releases/latest/download/LightDesktop.exe)** dosyasını indirin (veya sağ taraftaki **[Releases (Sürümler)](https://github.com/mertctnkaya/lightdesktop/releases/latest)** sayfasından indirin).
 2. Çift tıklayıp çalıştırın.
    - _Not: İlk açılışta uygulama yaklaşık 1 saniye boyunca kendi çalışma dosyalarını hazırlar; sonraki tüm açılışlarda anında açılır._
 3. İlk açılışta gelen **Hızlı Kurulum Sihirbazı** (veya **⚙️ Ayarlar → Windows Entegrasyonu**) üzerinden tek tıkla:
@@ -47,6 +49,9 @@ Hiçbir ek program yüklemeden doğrudan kullanmak için:
   - **Ekrandakiler:** Sadece o an ekranda görünen medya dosyaları sırayla yüklenir.
   - **Tüm Klasör:** İstediğiniz klasördeki tüm kapakları sırayla önbelleğe alır (dilediğiniz an durdurulabilir).
   - _Ayrıca kapaklar kapalıyken bile herhangi bir satırdaki **👁️** simgesine tıklayarak sadece o dosyanın önizleme kapağını yükletebilirsiniz._
+- **Sıfır Kurulumla Video & Fotoğraf Kapağı `(v1.1.0)`:** Bilgisayarda FFmpeg kurulu olmasa bile yerleşik Windows Shell desteği sayesinde video ve fotoğraf kapaklarını ek kurulum gerektirmeden üretir.
+- **Sürüklenebilir Sütunlar & Başlık Filtresi `(v1.1.0)`:** Liste görünümünde `Ad`, `Değiştirme tarihi`, `Tür` ve `Boyut` sütun genişliklerini sürükleyerek ayarlayabilir (çift tıkla sıfırlanır) ve her sütunun yanındaki `▾` okundan Windows tarzı hızlı filtre/sıralama yapabilirsiniz.
+- **Klasöre Özel Görünüm Hafızası `(v1.1.0)`:** Her klasör için seçtiğiniz görünüm modu (liste, kapak vb.) klasör bazında otomatik hatırlanır.
 
 ### 2. Binlerce Fotoğraf ve Videoyu Tek Tuşla Hızlıca Ayıklama (QuickLook & Eleme)
 
@@ -54,13 +59,14 @@ Harici bir fotoğraf veya video oynatıcı açıp kapatma derdini bitirir:
 
 - Herhangi bir dosyada **`Space` (Boşluk)** tuşuna bastığınızda anında önizleme penceresi açılır.
 - **Tek Tuşla Karar Ver ve Sonrakine Geç:**
-  - Beğendiklerinizi **`B`** tuşuyla **Sepet**'e atın; otomatik olarak bir sonraki fotoğraf/videoya geçer.
+  - Beğendiklerinizi **`B`** tuşuyla **Sepet**'e atın; otomatik olarak bir sonraki fotoğraf/videoya geçer. (Önizlemedeyken **`Sepette ✓`** butonuna veya **`B`** tuşuna basarak öğeyi sepetten çıkarabilirsiniz `(v1.1.0)`.)
   - İstemeyeceklerinizi **`Del`** tuşuyla anında Geri Dönüşüm Kutusu'na gönderin (hiç beklemeden ekrandan düşer ve hemen sıradaki dosyaya geçer).
 - **Yakınlaştırma, Parlaklık ve Ses Hafızası:**
   - Hem fotoğraf hem de videolarda yakınlaştırma (`+` / `-` / `0`) ve sürükleyerek inceleme yapabilirsiniz.
   - Karanlık çıkan çekimleri incelemek için önizleme içindeki **parlaklık kaydırıcısını** kullanabilirsiniz.
   - Video sesini kıstığınızda veya kapattığınızda sonraki videolarda da ses tercihiniz hatırlanır.
 - **Sepette Olduğunu Anında Görün:** Sepete eklediğiniz fotoğraf, video ve klasörlerin sol alt köşesinde küçük sepet/onay rozeti görünür; aynı şekilde önizleme penceresinde de o dosyanın sepette olup olmadığı belli olur.
+- **✨ Önizlemeden Benzerlerini Bul `(v1.1.0)`:** Önizleme penceresindeki **✨ Benzerlerini Bul** düğmesiyle o dosya ile aynı saatte/günde çekilen veya benzer isimli tüm dosyaları anında listeleyebilirsiniz.
 
 ### 3. Klasör Gezerken Dosya Toplama: Toplama Sepeti (`🧺 Sepet`)
 
@@ -70,18 +76,22 @@ Farklı farklı klasörlerden seçeceğiniz fotoğraf, belge veya videoları tek
 - İster ana pencerede ister **Çift Panel** içinde hedef klasöre gidin.
 - Sağ tık menüsünden veya tek tıkla **"Sepettekileri Buraya Taşı"** / **"Buraya Kopyala"** diyerek tüm seçtiklerinizi tek seferde hedefe aktarın. (Sürükle-bırakla taşıdığınız öğeler sepetten otomatik olarak temizlenir.)
 
-### 4. Çift Panel (`F3`) ve Güvenli Transfer
+### 4. Çift Panel (`F3`), Masaüstü Sürükle-Bırak ve Güvenli Transfer
 
 - **`F3`** tuşuyla ekranın sağında bağımsız bir hedef klasör paneli açılır.
 - Sol taraftan sağ panele (veya soldaki klasör ağacına) sürükleyip bırakarak taşıma yapabilir, **`Ctrl`** basılı tutarak kopyalayabilirsiniz.
+- **Çift Yönlü Masaüstü Sürükle-Bırak & Windows Pano Uyumu `(v1.1.0)`:** LightDesktop'tan Windows Masaüstü'ne veya diğer uygulamalara dosya sürükleyip bırakabilir, dışarıdan LightDesktop klasörlerine dosya bırakabilirsiniz. Uygulama içindeki `Ctrl+C` / `Ctrl+X` / `Ctrl+V` işlemleri Windows dosya panosuyla doğrudan uyumlu çalışır.
+- **Akıllı Disk Kuralı `(v1.1.0)`:** Aynı disk içine sürükle-bırak yaparken otomatik **taşıma**, farklı diske (ör. HDD'den Masaüstü'ne) sürüklerken kaynak dosyayı silmeden otomatik **kopyalama** uygulanır (`Ctrl` = Kopyala, `Shift` = Taşı).
+- **🕒 Son Erişilen Yollar `(v1.1.0)`:** Sol kenar çubuğunda _Cihazlar ve Sürücüler_ üstünde açılır kapanır liste halinde son dosya taşıdığınız veya kopyaladığınız 15 hedef klasör tutulur; doğrudan üzerine sürükle-bırakla ya da sağ tık **Gönder** menüsüyle tek hamlede dosya aktarabilirsiniz.
 - **Transfer Doğrulama:** Başka bir diske dosya taşırken kaynak dosyanın silinmeden önce hedefe eksiksiz yazıldığı otomatik olarak kontrol edilir. Büyük işlemlerde alttaki ilerleme çubuğundan anlık hızı görebilir, işlemi duraklatabilir veya iptal edebilirsiniz.
 
-### 5. Gelişmiş Aralık Seçimi ve Akıllı Filtre (`🎯 Aralık & Filtre`)
+### 5. Gelişmiş Aralık Seçimi, Akıllı Filtre (`🎯 Aralık & Filtre`) ve Benzerlerini Bul
 
 _"IMG_1050 ile IMG_1420 arasını seç"_, _"100 MB'tan büyük videoları bul"_ veya _"Sadece kopya (1), (2) dosyalarını ayır"_ gibi karmaşık seçimleri tek ekranda halledin:
 
 - İsim / kalıp arama, dosya adındaki sayı aralığı (`1050` – `1420`), boyut aralığı (`KB / MB / GB`), tarih aralığı, tür (video, fotoğraf, arşiv, belge, ses) ve satır sırası aralığı ile filtreleyin.
 - Eşleşenleri tek tıkla seçin, sepete atın, yeni klasöre taşıyın veya temizleyin.
+- **✨ İlişkili ve Benzer Dosyaları Bul `(v1.1.0)`:** Araç çubuğundan, sağ tık menüsünden veya Hızlı Önizleme içinden tek tıkla seçili dosyanın hem değiştirilme tarihine hem de dosya adındaki çekim tarihine göre **±1 saat**, **aynı gün**, **±3 gün**, **aynı ay** veya **benzer ad** modlarında bu klasörde, diskte ya da tüm indekslenmiş disklerde eşleşen diğer dosyaları tek listede toplayabilirsiniz.
 
 ### 6. Dağınık Telefon / Kamera Yedeklerini Tek Tıkla Düzenleme (`📅 Tarihle Klasörle`)
 
@@ -103,9 +113,10 @@ _"IMG_1050 ile IMG_1420 arasını seç"_, _"100 MB'tan büyük videoları bul"_ 
 ### 9. Özellikler, Toplu Adlandırma ve Ayarlar Merkezi (`Ctrl+,`)
 
 - **Toplu Yeniden Adlandırma (`F2`):** Birden fazla dosya seçiliyken `F2` tuşuna basarsanız desen/sıra numaralı toplu isimlendirme açılır.
-- **Özellikler (`Alt+Enter`):** Tekli veya çoklu seçilen dosya ve klasörlerin toplam gerçek boyutunu, dosya sayısını ve tarihlerini gösterir.
+- **Özellikler (`Alt+Enter`):** Tekli veya çoklu seçilen dosya ve klasörlerin toplam gerçek boyutunu, dosya sayısını ve tarihlerini gösterir; `Konum` ve `Tam Yol` satırları seçilebilir ve tek tıkla kopyalanabilir `(v1.1.0)`.
+- **Windows Sistem Entegrasyonu & Kurulum Sihirbazı `(v1.1.0)`:** İlk kurulum sihirbazı veya Ayarlar üzerinden tek tıkla sabit konuma kurulum (`%LOCALAPPDATA%\LightDesktop`), Masaüstü/Başlat menüsü kısayolu (`Ctrl+Alt+E`), klasör sağ tık menüsü, sistem tepsisinde arka planda hazır bekleme (`--background`) ve istendiğinde Windows Gezgini'ne tek tıkla geri döndürülebilen **Varsayılan Klasör Gezgini** modu yönetilebilir (`Denetim Masası` gibi sanal sistem klasörleri otomatik olarak Windows Gezgini'nde açılır).
 - **Ayarlar Merkezi (`⚙️ Ayarlar`):** Varsayılan görünüm modu, varsayılan kapak yükleme modu, kenar çubuğu genişliği, silme onayı, yeni sekme başlangıç konumu, görsel parlaklık ve önizleme tercihleri gibi pek çok ayarı kendinize göre özelleştirebilirsiniz.
-- **Hata ve Teşhis Merkezi (`⚠️ Hatalar`):** Beklenmedik bir sorun yaşarsanız uygulama mümkün olan her durumda çalışmayı sürdürür ve tek tıkla kopyalanabilir ayrıntılı hata raporu hazırlar.
+- **Hata ve Teşhis Merkezi (`⚠️ Hatalar`):** Beklenmedik bir sorun yaşarsanız uygulama mümkün olan her durumda çalışmayı sürdürür (bozuk indeks veritabanı otomatik onarılır) ve **🩺 Teşhis Raporu Kopyala** ile tek tıkla paylaşılabilir ayrıntılı hata raporu hazırlar `(v1.1.0)`.
 
 ---
 
