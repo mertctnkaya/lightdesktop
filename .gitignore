@@ -8,3 +8,4 @@ logs.txt.prev
 server-error.log
 *.tmp
 node_modules/
+GEMINI.md

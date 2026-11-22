@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const { execFile, spawn } = require('node:child_process');
 const readline = require('node:readline');
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 const PORT = Number(process.env.LIGHTDESKTOP_PORT) || 3847;
 let activePort = PORT;
 const HOST = '127.0.0.1';
@@ -26,16 +26,7 @@ function resolveLogFile() {
       return process.env.LD_LOG_FILE;
     } catch {}
   }
-  if (process.env.LD_PORTABLE === '1') {
-    return path.join(idx.CACHE_ROOT, 'logs.txt');
-  }
-  const localLog = path.join(__dirname, 'logs.txt');
-  try {
-    fs.accessSync(__dirname, fs.constants.W_OK);
-    return localLog;
-  } catch {
-    return path.join(idx.CACHE_ROOT, 'logs.txt');
-  }
+  return path.join(idx.CACHE_ROOT, 'logs.txt');
 }
 
 const LOG_FILE = resolveLogFile();
@@ -771,19 +762,85 @@ function readJsonBody(req) {
   });
 }
 
-function runPowerShellEnv(script, envVars = {}, timeoutMs = 30000) {
+function runPowerShellEnv(script, envVars = {}, timeoutMs = 30000, useSta = false) {
   return new Promise((resolve, reject) => {
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    const psArgs = ['-NoProfile', '-NonInteractive'];
+    if (useSta) psArgs.push('-STA');
+    psArgs.push('-EncodedCommand', encoded);
     execFile(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+      psArgs,
       { env: { ...process.env, ...envVars }, windowsHide: true, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
-        if (err) return reject(new Error(stderr || err.message));
+        if (err) {
+          const cleanErr = String(stderr || '').trim()
+            || String(err.message || '').replace(/powershell\.exe[\s\S]*?-EncodedCommand\s+[A-Za-z0-9+/=]+/i, `PowerShell hatası (kod ${err.code || 1})`);
+          return reject(new Error(cleanErr || `PowerShell hatası (kod ${err.code || 1})`));
+        }
         resolve(stdout);
       }
     );
   });
+}
+
+async function setOsFileClipboard(op, paths = []) {
+  const valid = (Array.isArray(paths) ? paths : []).map((p) => path.resolve(p)).filter((p) => fs.existsSync(p));
+  if (valid.length === 0) return { ok: false, count: 0 };
+  const psScript = `
+    Add-Type -AssemblyName System.Windows.Forms
+    $paths = $env:LD_CLIP_PATHS -split [char]10 | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    if ($paths.Count -gt 0) {
+      $col = New-Object System.Collections.Specialized.StringCollection
+      foreach ($p in $paths) { [void]$col.Add($p) }
+      $data = New-Object System.Windows.Forms.DataObject
+      $data.SetFileDropList($col)
+      $effectVal = if ($env:LD_CLIP_OP -eq 'cut') { [byte[]](2,0,0,0) } else { [byte[]](5,0,0,0) }
+      $ms = New-Object System.IO.MemoryStream(, $effectVal)
+      $data.SetData('Preferred DropEffect', $ms)
+      [System.Windows.Forms.Clipboard]::SetDataObject($data, $true)
+    }
+    exit 0
+  `;
+  await runPowerShellEnv(psScript, {
+    LD_CLIP_OP: op === 'cut' ? 'cut' : 'copy',
+    LD_CLIP_PATHS: valid.join('\n'),
+  }, 8000, true);
+  return { ok: true, count: valid.length };
+}
+
+async function getOsFileClipboard() {
+  const psScript = `
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    Add-Type -AssemblyName System.Windows.Forms
+    $paths = @()
+    $op = 'copy'
+    if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
+      $list = [System.Windows.Forms.Clipboard]::GetFileDropList()
+      foreach ($p in $list) { if ($p) { $paths += $p } }
+      $data = [System.Windows.Forms.Clipboard]::GetDataObject()
+      if ($data -and $data.GetDataPresent('Preferred DropEffect')) {
+        $eff = $data.GetData('Preferred DropEffect')
+        if ($eff -is [System.IO.MemoryStream]) {
+          $bytes = $eff.ToArray()
+          if ($bytes.Length -ge 1 -and ($bytes[0] -band 2) -eq 2 -and ($bytes[0] -band 1) -eq 0) {
+            $op = 'cut'
+          }
+        }
+      }
+    }
+    @{ op = $op; paths = $paths } | ConvertTo-Json -Compress
+    exit 0
+  `;
+  try {
+    const out = await runPowerShellEnv(psScript, {}, 6000, true);
+    const parsed = JSON.parse(String(out || '').trim() || '{}');
+    const paths = Array.isArray(parsed.paths) ? parsed.paths : (parsed.paths ? [parsed.paths] : []);
+    return { ok: true, op: parsed.op === 'cut' ? 'cut' : 'copy', paths: paths.filter((p) => fs.existsSync(p)) };
+  } catch {
+    return { ok: false, op: 'copy', paths: [] };
+  }
 }
 
 // ---------- Sürücü Bilgileri (30sn önbellekli) ----------
@@ -1616,17 +1673,34 @@ async function handleFsAction(body) {
 
   if (action === 'open') {
     const resolved = path.resolve(body.path);
+    const workDir = path.dirname(resolved);
+    if (/\.(bat|cmd)$/i.test(resolved)) {
+      await runPowerShellEnv(
+        `
+          $ProgressPreference = 'SilentlyContinue'
+          Add-Type -Namespace LDWin -Name ConsoleDetach -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool FreeConsole();'
+          [LDWin.ConsoleDetach]::FreeConsole() | Out-Null
+          Start-Process -FilePath 'cmd.exe' -ArgumentList ('/c ""' + $env:LD_TARGET + '""') -WorkingDirectory $env:LD_WORKDIR -WindowStyle Normal
+          exit 0
+        `,
+        { LD_TARGET: resolved, LD_WORKDIR: workDir }
+      );
+      return { ok: true };
+    }
     await new Promise((resolve, reject) => {
       let settled = false;
       const child = execFile(
         'rundll32.exe',
         ['url.dll,FileProtocolHandler', resolved],
-        { windowsHide: true },
+        { cwd: workDir, windowsHide: false },
         (err) => {
           if (settled) return;
           settled = true;
           if (err) {
-            runPowerShellEnv("$ProgressPreference='SilentlyContinue'; Invoke-Item -LiteralPath $env:LD_TARGET", { LD_TARGET: resolved })
+            runPowerShellEnv(
+              "$ProgressPreference='SilentlyContinue'; Start-Process -FilePath $env:LD_TARGET -WorkingDirectory $env:LD_WORKDIR -WindowStyle Normal",
+              { LD_TARGET: resolved, LD_WORKDIR: workDir }
+            )
               .then(() => resolve())
               .catch(reject);
           } else {
@@ -1790,57 +1864,8 @@ async function handleFsAction(body) {
   }
 
   if (action === 'installShortcut') {
-    const exePath = process.env.LD_EXE_PATH && fs.existsSync(process.env.LD_EXE_PATH) ? process.env.LD_EXE_PATH : '';
-    const batPath = path.join(__dirname, 'Baslat-LightDesktop.bat');
-    const customIco = path.join(__dirname, 'public', 'favicon.ico');
-    const iconLoc = exePath
-      ? `${exePath},0`
-      : (fs.existsSync(customIco) ? customIco : `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\shell32.dll,4`);
-    const targetPath = exePath || batPath;
-    const workDir = exePath ? path.dirname(exePath) : __dirname;
-    const dirCommand = exePath ? `"${exePath}" "%1"` : '';
-    const bgCommand = exePath ? `"${exePath}" "%V"` : '';
-    const psScript = `
-      $ProgressPreference = 'SilentlyContinue'
-      $ws = New-Object -ComObject WScript.Shell
-      $desktop = [Environment]::GetFolderPath('Desktop')
-      $lnk = $ws.CreateShortcut((Join-Path $desktop 'LightDesktop.lnk'))
-      $lnk.TargetPath = $env:LD_TARGET
-      $lnk.WorkingDirectory = $env:LD_DIR
-      $lnk.IconLocation = $env:LD_ICON
-      $lnk.Description = 'LightDesktop - HDD Dostu Dosya Gezgini'
-      $lnk.Save()
-
-      $dirKey = 'HKCU:\\Software\\Classes\\Directory\\shell\\LightDesktop'
-      $dirCmd = 'HKCU:\\Software\\Classes\\Directory\\shell\\LightDesktop\\command'
-      New-Item -Path $dirCmd -Force | Out-Null
-      Set-ItemProperty -Path $dirKey -Name '(Default)' -Value 'LightDesktop ile Ac'
-      Set-ItemProperty -Path $dirKey -Name 'Icon' -Value $env:LD_ICON
-      if ($env:LD_DIR_CMD) {
-        Set-ItemProperty -Path $dirCmd -Name '(Default)' -Value $env:LD_DIR_CMD
-      } else {
-        Set-ItemProperty -Path $dirCmd -Name '(Default)' -Value ('cmd.exe /c ""' + $env:LD_TARGET + '" "%1""')
-      }
-
-      $bgKey = 'HKCU:\\Software\\Classes\\Directory\\Background\\shell\\LightDesktop'
-      $bgCmd = 'HKCU:\\Software\\Classes\\Directory\\Background\\shell\\LightDesktop\\command'
-      New-Item -Path $bgCmd -Force | Out-Null
-      Set-ItemProperty -Path $bgKey -Name '(Default)' -Value 'LightDesktop ile Ac'
-      Set-ItemProperty -Path $bgKey -Name 'Icon' -Value $env:LD_ICON
-      if ($env:LD_BG_CMD) {
-        Set-ItemProperty -Path $bgCmd -Name '(Default)' -Value $env:LD_BG_CMD
-      } else {
-        Set-ItemProperty -Path $bgCmd -Name '(Default)' -Value ('cmd.exe /c ""' + $env:LD_TARGET + '" "%V""')
-      }
-    `;
-    await runPowerShellEnv(psScript, {
-      LD_TARGET: targetPath,
-      LD_DIR: workDir,
-      LD_ICON: iconLoc,
-      LD_DIR_CMD: dirCommand,
-      LD_BG_CMD: bgCommand,
-    });
-    return { ok: true, icon: iconLoc, target: targetPath };
+    const res = await applySystemIntegration({ action: 'installShortcuts' });
+    return { ok: true, status: res.status };
   }
 
   if (action === 'clearThumbCache') {
@@ -1849,6 +1874,186 @@ async function handleFsAction(body) {
   }
 
   throw new Error(`Bilinmeyen işlem: ${action}`);
+}
+
+// ---------- Windows Sistem Entegrasyonu (Varsayılan Gezgin, Kısayollar, Başlangıç) ----------
+function getIntegrationTargetInfo() {
+  const exePath = process.env.LD_EXE_PATH && fs.existsSync(process.env.LD_EXE_PATH)
+    ? path.resolve(process.env.LD_EXE_PATH)
+    : '';
+  const isPortable = process.env.LD_PORTABLE === '1' && Boolean(exePath);
+  const fixedExePath = process.env.LOCALAPPDATA
+    ? path.join(process.env.LOCALAPPDATA, 'LightDesktop', 'LightDesktop.exe')
+    : '';
+  const hasFixedExe = Boolean(fixedExePath && fs.existsSync(fixedExePath));
+  const isRunningFromFixed = Boolean(exePath && fixedExePath && exePath.toLowerCase() === fixedExePath.toLowerCase());
+  const devBatPath = path.resolve(__dirname, '..', 'Baslat-LightDesktop.bat');
+  const distExePath = path.resolve(__dirname, '..', 'dist', 'LightDesktop.exe');
+  const hasDistExe = fs.existsSync(distExePath);
+  const preferredExe = hasFixedExe ? fixedExePath : (isPortable ? exePath : (hasDistExe ? distExePath : ''));
+  const targetPath = preferredExe || (fs.existsSync(devBatPath) ? devBatPath : path.join(__dirname, 'Baslat-LightDesktop.bat'));
+  const usesExe = targetPath.toLowerCase().endsWith('.exe');
+  const workDir = usesExe ? path.dirname(targetPath) : path.dirname(targetPath);
+  const customIco = path.join(__dirname, 'public', 'favicon.ico');
+  const iconLoc = usesExe
+    ? `${targetPath},0`
+    : (fs.existsSync(customIco) ? customIco : `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\shell32.dll,4`);
+  return {
+    isPortable,
+    exePath,
+    fixedExePath,
+    distExePath,
+    hasFixedExe,
+    isRunningFromFixed,
+    targetPath,
+    usesExe,
+    workDir,
+    iconLoc,
+  };
+}
+
+async function getSystemIntegrationStatus() {
+  const info = getIntegrationTargetInfo();
+  const psScript = `
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    $startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'LightDesktop.lnk'
+    $hasDesktop = Test-Path -LiteralPath (Join-Path $desktop 'LightDesktop.lnk')
+    $hasStartMenu = Test-Path -LiteralPath $startMenu
+    $hasCtx = Test-Path -LiteralPath 'HKCU:\\Software\\Classes\\Directory\\shell\\LightDesktop\\command'
+    $folderOpenCmd = ''
+    try {
+      $folderOpenCmd = (Get-ItemProperty -Path 'HKCU:\\Software\\Classes\\Folder\\shell\\open\\command' -Name '(Default)' -ErrorAction SilentlyContinue).'(Default)'
+    } catch {}
+    $isDef = [bool]($folderOpenCmd -and ($folderOpenCmd -match 'LightDesktop'))
+    $runVal = ''
+    try {
+      $runVal = (Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'LightDesktop' -ErrorAction SilentlyContinue).'LightDesktop'
+    } catch {}
+    @{
+      hasDesktopShortcut = [bool]$hasDesktop
+      hasStartMenuShortcut = [bool]$hasStartMenu
+      hasContextMenu = [bool]$hasCtx
+      isDefaultExplorer = [bool]$isDef
+      autoStartEnabled = [bool]$runVal
+    } | ConvertTo-Json -Compress
+  `;
+  let regState = {
+    hasDesktopShortcut: false,
+    hasStartMenuShortcut: false,
+    hasContextMenu: false,
+    isDefaultExplorer: false,
+    autoStartEnabled: false,
+  };
+  try {
+    const out = await runPowerShellEnv(psScript, {});
+    const parsed = JSON.parse(String(out || '').trim() || '{}');
+    regState = { ...regState, ...parsed };
+  } catch {}
+  return {
+    ...info,
+    ...regState,
+  };
+}
+
+async function applySystemIntegration(opts = {}) {
+  const action = opts.action || '';
+  let info = getIntegrationTargetInfo();
+
+  if (action === 'installFixedApp' || opts.installFixed === true) {
+    if (info.isPortable && info.fixedExePath && !info.isRunningFromFixed) {
+      await fsp.mkdir(path.dirname(info.fixedExePath), { recursive: true });
+      await fsp.copyFile(info.exePath, info.fixedExePath);
+      info = getIntegrationTargetInfo();
+    }
+  }
+
+  const doShortcuts = action === 'installShortcuts' || opts.shortcuts === true;
+  const doContextMenu = action === 'installShortcuts' || opts.contextMenu === true;
+  const setDef = action === 'setDefaultExplorer'
+    ? (opts.enabled ? '1' : '0')
+    : (typeof opts.defaultExplorer === 'boolean' ? (opts.defaultExplorer ? '1' : '0') : '');
+  const setAuto = action === 'setAutoStart'
+    ? (opts.enabled ? '1' : '0')
+    : (typeof opts.autoStart === 'boolean' ? (opts.autoStart ? '1' : '0') : '');
+
+  const cmdOpen1 = info.usesExe ? `"${info.targetPath}" "%1"` : `cmd.exe /c ""${info.targetPath}" "%1""`;
+  const cmdOpenV = info.usesExe ? `"${info.targetPath}" "%V"` : `cmd.exe /c ""${info.targetPath}" "%V""`;
+  const cmdAuto = info.usesExe ? `"${info.targetPath}" --background` : `"${info.targetPath}"`;
+
+  const psScript = `
+    $ProgressPreference = 'SilentlyContinue'
+    if ($env:LD_DO_SHORTCUTS -eq '1') {
+      $ws = New-Object -ComObject WScript.Shell
+      $desktop = [Environment]::GetFolderPath('Desktop')
+      $programs = [Environment]::GetFolderPath('Programs')
+      foreach ($dir in @($desktop, $programs)) {
+        if (-not $dir) { continue }
+        $lnkPath = Join-Path $dir 'LightDesktop.lnk'
+        $lnk = $ws.CreateShortcut($lnkPath)
+        $lnk.TargetPath = $env:LD_TARGET
+        $lnk.WorkingDirectory = $env:LD_DIR
+        $lnk.IconLocation = $env:LD_ICON
+        $lnk.Description = 'LightDesktop - HDD Dostu Dosya Gezgini'
+        $lnk.Hotkey = 'Ctrl+Alt+E'
+        $lnk.Save()
+      }
+    }
+    if ($env:LD_DO_CTX -eq '1') {
+      $dirKey = 'HKCU:\\Software\\Classes\\Directory\\shell\\LightDesktop'
+      $dirCmd = 'HKCU:\\Software\\Classes\\Directory\\shell\\LightDesktop\\command'
+      New-Item -Path $dirCmd -Force | Out-Null
+      Set-ItemProperty -Path $dirKey -Name '(Default)' -Value 'LightDesktop ile Ac'
+      Set-ItemProperty -Path $dirKey -Name 'Icon' -Value $env:LD_ICON
+      Set-ItemProperty -Path $dirCmd -Name '(Default)' -Value $env:LD_CMD_1
+
+      $bgKey = 'HKCU:\\Software\\Classes\\Directory\\Background\\shell\\LightDesktop'
+      $bgCmd = 'HKCU:\\Software\\Classes\\Directory\\Background\\shell\\LightDesktop\\command'
+      New-Item -Path $bgCmd -Force | Out-Null
+      Set-ItemProperty -Path $bgKey -Name '(Default)' -Value 'LightDesktop ile Ac'
+      Set-ItemProperty -Path $bgKey -Name 'Icon' -Value $env:LD_ICON
+      Set-ItemProperty -Path $bgCmd -Name '(Default)' -Value $env:LD_CMD_V
+    }
+    if ($env:LD_SET_DEF -eq '1') {
+      $fCmdKey = 'HKCU:\\Software\\Classes\\Folder\\shell\\open\\command'
+      New-Item -Path $fCmdKey -Force | Out-Null
+      Set-ItemProperty -Path $fCmdKey -Name '(Default)' -Value $env:LD_CMD_1
+      Set-ItemProperty -Path $fCmdKey -Name 'DelegateExecute' -Value ''
+    } elseif ($env:LD_SET_DEF -eq '0') {
+      $fOpenKey = 'HKCU:\\Software\\Classes\\Folder\\shell\\open'
+      if (Test-Path -LiteralPath $fOpenKey) {
+        Remove-Item -LiteralPath $fOpenKey -Recurse -Force -ErrorAction SilentlyContinue
+      }
+    }
+    if ($env:LD_SET_AUTO -eq '1') {
+      $runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+      New-Item -Path $runKey -Force | Out-Null
+      Set-ItemProperty -Path $runKey -Name 'LightDesktop' -Value $env:LD_CMD_AUTO
+    } elseif ($env:LD_SET_AUTO -eq '0') {
+      $runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+      if (Get-ItemProperty -Path $runKey -Name 'LightDesktop' -ErrorAction SilentlyContinue) {
+        Remove-ItemProperty -Path $runKey -Name 'LightDesktop' -ErrorAction SilentlyContinue
+      }
+    }
+    exit 0
+  `;
+
+  if (doShortcuts || doContextMenu || setDef !== '' || setAuto !== '') {
+    await runPowerShellEnv(psScript, {
+      LD_TARGET: info.targetPath,
+      LD_DIR: info.workDir,
+      LD_ICON: info.iconLoc,
+      LD_DO_SHORTCUTS: doShortcuts ? '1' : '0',
+      LD_DO_CTX: doContextMenu ? '1' : '0',
+      LD_CMD_1: cmdOpen1,
+      LD_CMD_V: cmdOpenV,
+      LD_SET_DEF: setDef,
+      LD_SET_AUTO: setAuto,
+      LD_CMD_AUTO: cmdAuto,
+    });
+  }
+
+  return { ok: true, status: await getSystemIntegrationStatus() };
 }
 
 // ---------- Medya Akışı (HTTP Range Destekli QuickLook) ----------
@@ -1940,6 +2145,7 @@ const server = http.createServer(async (req, res) => {
         portable: process.env.LD_PORTABLE === '1',
         pid: process.pid,
         port: activePort,
+        serverDir: __dirname,
         startedAt: START_TIME,
         startCodeMtimeMs: START_CODE_MTIME,
         currentCodeMtimeMs: getBackendCodeMtimeMs(),
@@ -1949,6 +2155,15 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/diagnostics' && req.method === 'GET') {
       return sendJson(res, 200, buildDiagnosticsPayload());
+    }
+
+    if (pathname === '/api/system/integration' && req.method === 'GET') {
+      return sendJson(res, 200, await getSystemIntegrationStatus());
+    }
+
+    if (pathname === '/api/system/integration' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      return sendJson(res, 200, await applySystemIntegration(body));
     }
 
     if (pathname === '/api/init' && req.method === 'GET') {
@@ -2046,6 +2261,39 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const data = await idx.searchFiles(body);
       return sendJson(res, 200, data);
+    }
+
+    if (pathname === '/api/related' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const data = await idx.findRelatedFiles(body);
+      return sendJson(res, 200, data);
+    }
+
+    if (pathname === '/api/clipboard/os' && req.method === 'GET') {
+      const clipData = await getOsFileClipboard();
+      return sendJson(res, 200, clipData);
+    }
+
+    if (pathname === '/api/clipboard/os' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const resData = await setOsFileClipboard(body.op, body.paths);
+      return sendJson(res, 200, resData);
+    }
+
+    if (pathname === '/api/fs/upload-external' && req.method === 'POST') {
+      const destDir = url.searchParams.get('destDir');
+      const rawName = path.basename(url.searchParams.get('name') || '');
+      if (!destDir || !rawName) return sendJson(res, 400, { error: 'destDir ve name gerekli' });
+      const resolvedDir = path.resolve(destDir);
+      const destPath = makeUniquePath(path.join(resolvedDir, rawName));
+      await new Promise((resolve, reject) => {
+        const ws = fs.createWriteStream(destPath);
+        req.on('error', (err) => { ws.destroy(); reject(err); });
+        ws.on('error', reject);
+        ws.on('finish', resolve);
+        req.pipe(ws);
+      });
+      return sendJson(res, 200, { ok: true, path: destPath });
     }
 
     if (pathname === '/api/analyze' && req.method === 'GET') {
@@ -2428,7 +2676,7 @@ async function getItemsProperties(rawPaths = [], cancelToken = { aborted: false 
     }
 
     if (!res.headersSent && !res.writableEnded) {
-      res.writeHead(404);
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Bulunamadı');
     }
   } catch (err) {

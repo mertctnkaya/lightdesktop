@@ -67,6 +67,7 @@
         <button id="btn-paste" class="cmd-btn" title="Yapıştır (Ctrl+V)" disabled>📥 Yapıştır</button>
         <button id="btn-rename" class="cmd-btn" title="Yeniden Adlandır (F2)" disabled>✏️</button>
         <button id="btn-delete" class="cmd-btn danger-hover" title="Çöpe At (Del / Kalıcı: Shift+Del)" disabled>🗑️</button>
+        <button id="btn-find-related" class="cmd-btn" title="Seçili dosyayla aynı gün/saat veya benzer isimli dosyaları bul" disabled>✨ Benzer Bul</button>
         <button id="btn-properties" class="cmd-btn" title="Seçili Öğelerin Bilgisi / Özellikler (Alt+Enter)" disabled>ℹ️ Bilgi</button>
         <button id="btn-undo" class="cmd-btn" title="Son İşlemi Geri Al (Ctrl+Z)" disabled>↩️ Geri Al</button>
       </div>
@@ -144,6 +145,14 @@
           <div class="sidebar-section">
             <div class="sidebar-title">Sabitlenenler</div>
             <div id="pins-list"></div>
+          </div>
+
+          <div class="sidebar-section">
+            <button type="button" id="btn-toggle-recent-targets" class="sidebar-title sidebar-collapse-btn" title="Son dosya taşınan veya kopyalanan 15 yolu aç/kapat">
+              <span id="sb-recent-targets-chevron">▾</span>
+              <span>🕒 Son Erişilen Yollar (<span id="sb-recent-targets-count">0</span>)</span>
+            </button>
+            <div id="sb-recent-targets-list" class="sb-recent-targets-list"></div>
           </div>
 
           <div class="sidebar-section">
@@ -351,12 +360,58 @@
               <button id="btn-trash-empty" class="cmd-btn danger-hover">🧹 Çöp Kutusunu Boşalt</button>
             </div>
           </div>
+          <div id="related-bar" class="related-bar hidden">
+            <div class="related-bar-left">
+              <strong id="related-bar-title">✨ İlişkili Dosyalar</strong>
+              <span id="related-bar-summary" class="muted-text"></span>
+            </div>
+            <div class="related-bar-controls">
+              <div class="rel-mode-pills">
+                <button type="button" class="rel-mode-btn" data-rel-mode="nearTime" title="±1 saat civarında">🕐 ±1 Saat</button>
+                <button type="button" class="rel-mode-btn" data-rel-mode="sameDay" title="Aynı gün çekilen/değiştirilenler">📅 Aynı Gün</button>
+                <button type="button" class="rel-mode-btn" data-rel-mode="sameWeek" title="±3 gün aralığında">📆 Aynı Hafta</button>
+                <button type="button" class="rel-mode-btn" data-rel-mode="sameMonth" title="Aynı ay içinde">🗓️ Aynı Ay</button>
+                <button type="button" class="rel-mode-btn" data-rel-mode="similarName" title="Benzer isim / ortak kelime / seri">🔤 Benzer İsim</button>
+              </div>
+              <select id="related-bar-scope" class="cmd-select" title="Arama Kapsamı">
+                <option value="folder">📂 Bu Klasör</option>
+                <option value="drive">💽 Bu Disk (İndeks)</option>
+                <option value="all">🌐 Tüm Diskler</option>
+              </select>
+              <select id="related-bar-cat" class="cmd-select" title="Dosya Türü Filtresi">
+                <option value="media">🖼️ Medya / Aynı Tür</option>
+                <option value="exact">📌 Tam Aynı Tür</option>
+                <option value="all">📑 Tüm Dosyalar</option>
+              </select>
+              <button type="button" id="btn-related-close" class="cmd-btn">✕ Klasöre Dön</button>
+            </div>
+          </div>
           <div id="list-header" class="list-header">
             <div class="lh-cell lh-chk"><input id="chk-select-all" type="checkbox" title="Tümünü Seç" /></div>
-            <div class="lh-cell lh-name" data-sort="name">Ad</div>
-            <div class="lh-cell lh-date" data-sort="mtime">Değiştirme tarihi</div>
-            <div class="lh-cell lh-type" data-sort="ext">Tür</div>
-            <div class="lh-cell lh-size" data-sort="size">Boyut</div>
+            <div class="lh-cell lh-name" data-sort="name" data-col="name">
+              <span class="lh-label">Ad</span>
+              <span class="lh-sort-arrow" aria-hidden="true"></span>
+              <button type="button" class="lh-filter-btn" data-col="name" title="Ada göre sırala / filtrele">▾</button>
+              <span class="lh-resizer" data-col="name" title="Sütun genişliğini sürükleyerek ayarla (Çift tık: sıfırla)"></span>
+            </div>
+            <div class="lh-cell lh-date" data-sort="mtime" data-col="mtime">
+              <span class="lh-label">Değiştirme tarihi</span>
+              <span class="lh-sort-arrow" aria-hidden="true"></span>
+              <button type="button" class="lh-filter-btn" data-col="mtime" title="Tarihe göre sırala / filtrele">▾</button>
+              <span class="lh-resizer" data-col="mtime" title="Sütun genişliğini sürükleyerek ayarla (Çift tık: sıfırla)"></span>
+            </div>
+            <div class="lh-cell lh-type" data-sort="ext" data-col="ext">
+              <span class="lh-label">Tür</span>
+              <span class="lh-sort-arrow" aria-hidden="true"></span>
+              <button type="button" class="lh-filter-btn" data-col="ext" title="Türe göre sırala / filtrele">▾</button>
+              <span class="lh-resizer" data-col="ext" title="Sütun genişliğini sürükleyerek ayarla (Çift tık: sıfırla)"></span>
+            </div>
+            <div class="lh-cell lh-size" data-sort="size" data-col="size">
+              <span class="lh-label">Boyut</span>
+              <span class="lh-sort-arrow" aria-hidden="true"></span>
+              <button type="button" class="lh-filter-btn" data-col="size" title="Boyuta göre sırala / filtrele">▾</button>
+              <span class="lh-resizer" data-col="size" title="Sütun genişliğini sürükleyerek ayarla (Çift tık: sıfırla)"></span>
+            </div>
             <div class="lh-cell lh-eye" title="Tekil Kapak Yükle">👁️</div>
           </div>
           <div id="virtual-viewport" class="virtual-viewport" tabindex="0">
@@ -456,6 +511,7 @@
         <div class="cmd-sep"></div>
         <button id="btn-ql-prev" class="cmd-btn">◀ Önceki</button>
         <button id="btn-ql-next" class="cmd-btn">Sonraki ▶</button>
+        <button id="btn-ql-related" class="cmd-btn" title="Bu dosya ile aynı gün/saat veya benzer isimli tüm dosyaları bul">✨ Benzerlerini Bul</button>
         <button id="btn-ql-reveal" class="cmd-btn" title="Dosyanın Bulunduğu Klasörü Aç">📂 Bulunduğu Yeri Aç</button>
         <button id="btn-ql-open-ext" class="cmd-btn primary">Varsayılan Uygulamada Aç</button>
         <button id="btn-ql-close" class="icon-btn">✕</button>
@@ -650,6 +706,30 @@
             <option value="15">Çok Büyük (15 px)</option>
           </select>
         </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Varsayılan Klasör Görünümü</strong>
+            <span class="muted-text">Özel görünümü kaydedilmemiş klasörlerde kullanılacak görünüm</span>
+          </div>
+          <select id="set-default-view">
+            <option value="last">Son kullanılan görünüm</option>
+            <option value="list">☰ Detaylı Liste</option>
+            <option value="dense">≡ Sıkışık Liste</option>
+            <option value="compact">☷ Kompakt Liste</option>
+            <option value="tiles">▤ Döşemeler (Tiles)</option>
+            <option value="grid-sm">⊞ Küçük Kapaklar</option>
+            <option value="grid">⊞ Orta Kapaklar</option>
+            <option value="grid-lg">⊞ Büyük Kapaklar</option>
+            <option value="grid-xl">🖼️ Çok Büyük Galeri</option>
+          </select>
+        </div>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Klasöre özel görünüm modunu hatırla</strong>
+            <span class="muted-text">Her klasörde seçtiğiniz liste/galeri görünümünü o klasöre özel kaydeder</span>
+          </div>
+          <input type="checkbox" id="set-remember-folder-view" />
+        </label>
         <label class="settings-row settings-check">
           <div class="settings-label-wrap">
             <strong>Klasörleri her zaman en üstte sırala</strong>
@@ -754,11 +834,40 @@
       </div>
 
       <div class="settings-group">
+        <div class="settings-group-title">🪟 Windows Entegrasyonu &amp; Hızlı Erişim</div>
+        <div id="int-status-banner" class="settings-cache-box">Sistem entegrasyon durumu kontrol ediliyor...</div>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Varsayılan Klasör Gezgini Yap</strong>
+            <span class="muted-text">Windows'ta bir klasör açıldığında LightDesktop açılır (Denetim Masası/Ağ Windows Gezgini'ne bırakılır)</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <button type="button" id="btn-int-restore-explorer" class="cmd-btn hidden">↩️ Gezgine Dön</button>
+            <input type="checkbox" id="set-int-default-explorer" />
+          </div>
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Windows Açılışında Arka Planda Hazır Bekle</strong>
+            <span class="muted-text">Sistem tepsisinde bekler; klasörleri ve Ctrl+Alt+E kısayolunu anında açar</span>
+          </div>
+          <input type="checkbox" id="set-int-autostart" />
+        </label>
+        <div class="settings-actions-grid">
+          <button type="button" id="btn-int-shortcuts" class="cmd-btn">📌 Masaüstü, Başlat Menüsü (Ctrl+Alt+E) &amp; Sağ Tık</button>
+          <button type="button" id="btn-int-install-fixed" class="cmd-btn hidden">💾 Sabit Konuma Kur (%LOCALAPPDATA%\LightDesktop)</button>
+          <button type="button" id="btn-int-open-welcome" class="cmd-btn">✨ Hızlı Kurulum Sihirbazını Aç</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
         <div class="settings-group-title">🛡️ Önbellek, Kısayol &amp; Bakım</div>
         <div id="settings-cache-stats" class="settings-cache-box">Yükleniyor...</div>
         <div class="settings-actions-grid">
           <button type="button" id="btn-set-clear-thumbs" class="cmd-btn">🖼️ Kapak Önbelleğini Temizle</button>
           <button type="button" id="btn-set-clear-recents" class="cmd-btn">🧹 Son Klasör &amp; Dosya Geçmişini Sil</button>
+          <button type="button" id="btn-set-clear-folder-views" class="cmd-btn">📂 Klasör Görünümlerini Sıfırla</button>
+          <button type="button" id="btn-set-reset-col-widths" class="cmd-btn">↔️ Sütun Genişliklerini Sıfırla</button>
           <button type="button" id="btn-set-update-shortcut" class="cmd-btn">📌 Masaüstü Kısayolunu &amp; İkonu Kur</button>
           <button type="button" id="btn-set-reset-defaults" class="cmd-btn danger-hover">🔄 Ayarları Varsayılana Sıfırla</button>
         </div>
@@ -771,6 +880,116 @@
     </div>
   </dialog>
 
+  <!-- İlk Açılış / Hızlı Kurulum Sihirbazı -->
+  <dialog id="welcome-setup-dialog" class="modal-dialog welcome-dialog" closedby="any" aria-labelledby="welcome-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span class="props-icon">🚀</span>
+        <div>
+          <strong id="welcome-title">LightDesktop'a Hoş Geldiniz — Hızlı Entegrasyon</strong>
+          <div class="muted-text">Uygulamayı Windows Gezgini kadar hızlı açabilmeniz için tek tık kurulumu</div>
+        </div>
+      </div>
+      <button type="button" id="btn-wel-close" class="icon-btn">✕</button>
+    </div>
+    <div class="settings-body">
+      <div class="settings-group">
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>📌 Masaüstü &amp; Başlat Menüsü Kısayolu (Ctrl+Alt+E) + Sağ Tık</strong>
+            <span class="muted-text">Her klasörde "LightDesktop ile Aç" sağ tık menüsü, Başlat Menüsü araması ve Ctrl+Alt+E kısayolu kurar</span>
+          </div>
+          <input type="checkbox" id="wel-shortcuts" checked />
+        </label>
+        <label id="wel-fixed-row" class="settings-row settings-check hidden">
+          <div class="settings-label-wrap">
+            <strong>💾 Sabit Konuma Kur (%LOCALAPPDATA%\LightDesktop)</strong>
+            <span class="muted-text">İndirdiğiniz dosyayı silseniz veya taşısanız bile kısayolların bozulmamasını sağlar</span>
+          </div>
+          <input type="checkbox" id="wel-fixed" checked />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>📂 Varsayılan Klasör Gezgini Yap (Önerilen)</strong>
+            <span class="muted-text">Klasörler çift tıkta LightDesktop ile açılır; istediğiniz an Ayarlar'dan tek tıkla Windows Gezgini'ne dönebilirsiniz</span>
+          </div>
+          <input type="checkbox" id="wel-default-explorer" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>⚡ Windows Açılışında Arka Planda Hazır Bekle</strong>
+            <span class="muted-text">Sistem tepsisinde hafifçe bekleyerek pencereleri ~0.1 saniyede açar</span>
+          </div>
+          <input type="checkbox" id="wel-autostart" />
+        </label>
+      </div>
+      <div class="muted-text" style="font-size:11.5px;line-height:1.45;">
+        💡 Bu pencereyi kapatsanız bile tüm ayarları istediğiniz zaman sağ üstteki <b>⚙️ Ayarlar → Windows Entegrasyonu</b> altından değiştirebilirsiniz.
+      </div>
+    </div>
+    <div class="props-footer">
+      <button type="button" id="btn-wel-skip" class="cmd-btn">Şimdi Değil</button>
+      <button type="button" id="btn-wel-apply" class="cmd-btn primary">✓ Seçilenleri Uygula</button>
+    </div>
+  </dialog>
+
+  <!-- Akıllı İlişkili & Benzer Dosya Bulucu Modalı -->
+  <dialog id="related-dialog" class="modal-dialog related-dialog" closedby="any" aria-labelledby="related-dlg-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span class="props-icon">✨</span>
+        <div style="min-width:0;">
+          <strong id="related-dlg-title">Benzer ve Yakın Zamanlı Dosyaları Bul</strong>
+          <div id="related-dlg-sub" class="muted-text" style="word-break:break-all;"></div>
+        </div>
+      </div>
+      <button type="button" id="btn-rel-dlg-close" class="icon-btn">✕</button>
+    </div>
+    <div class="settings-body">
+      <div class="rel-dlg-options">
+        <label class="rel-opt-field">
+          <span>Nerede Aransın?</span>
+          <select id="rel-dlg-scope">
+            <option value="folder">📂 Bu Klasör (Canlı, İndeks Gerekmez)</option>
+            <option value="drive">💽 Bu Diskin Tamamı (İndeksten)</option>
+            <option value="all">🌐 Tüm İndeksli Diskler</option>
+          </select>
+        </label>
+        <label class="rel-opt-field">
+          <span>Dosya Türü</span>
+          <select id="rel-dlg-cat">
+            <option value="media">🖼️ Video &amp; Fotoğraf / İlgili Tür</option>
+            <option value="exact">📌 Yalnızca Tam Aynı Uzantı/Tür</option>
+            <option value="all">📑 Tüm Dosya Türleri</option>
+          </select>
+        </label>
+      </div>
+      <div class="rel-cards-grid">
+        <button type="button" class="rel-card" data-rel-pick="nearTime">
+          <div class="rel-card-title">🕐 Yakın Saat (±1 saat)</div>
+          <div id="rel-desc-nearTime" class="rel-card-desc">Aynı çekim / kayıt anına çok yakın dosyalar</div>
+        </button>
+        <button type="button" class="rel-card" data-rel-pick="sameDay">
+          <div class="rel-card-title">📅 Aynı Gün</div>
+          <div id="rel-desc-sameDay" class="rel-card-desc">Aynı gün içindeki tüm kayıtlar</div>
+        </button>
+        <button type="button" class="rel-card" data-rel-pick="sameWeek">
+          <div class="rel-card-title">📆 Aynı Hafta (±3 gün)</div>
+          <div id="rel-desc-sameWeek" class="rel-card-desc">O günün birkaç gün öncesi ve sonrası</div>
+        </button>
+        <button type="button" class="rel-card" data-rel-pick="sameMonth">
+          <div class="rel-card-title">🗓️ Aynı Ay</div>
+          <div id="rel-desc-sameMonth" class="rel-card-desc">Aynı ay içinde oluşturulmuş dosyalar</div>
+        </button>
+        <button type="button" class="rel-card rel-card-wide" data-rel-pick="similarName">
+          <div class="rel-card-title">🔤 Benzer İsimliler / Seri Dosyalar</div>
+          <div id="rel-desc-similarName" class="rel-card-desc">Dosya adındaki ortak kelimelere veya isim kalıbına göre eşleştirir</div>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="col-filter-popover" class="col-filter-popover" popover="manual" role="menu"></div>
   <div id="toast-container" class="toast-container"></div>
   <script src="/app.js"></script>
 </body>

@@ -53,8 +53,15 @@ const state = {
   sortBy: 'name',
   sortDir: 'asc',
   viewMode: 'list', // list | compact | grid
+  globalViewMode: 'list',
+  folderViews: {}, // normalizedPath -> viewMode
+  colWidths: { name: null, mtime: null, ext: null, size: null },
+  colFilters: { name: new Set(), mtime: new Set(), ext: new Set(), size: new Set() },
+  suppressHeaderSortUntil: 0,
+  activeFilterCol: null,
   thumbMode: 'off', // off | selected | viewport | all
   filterOnlyMatched: false,
+  relatedCtx: null,
 
   // Pano & Sepet
   clipboard: { op: null, paths: [] },
@@ -103,6 +110,8 @@ const state = {
   // Hızlı Erişim: Son Açılan Klasörler & Son Erişilen Dosyalar
   recentFolders: [],
   recentFiles: [],
+  recentTransferTargets: [], // En son dosya taşınan/kopyalanan max 15 hedef klasör (LRU)
+  recentTargetsOpen: true,
   dashSections: { quick: true, folders: true, files: true },
 
   // Uygulama Ayarları
@@ -112,6 +121,8 @@ const state = {
     foldersFirst: true,
     showExtensions: true,
     compactSidebar: false,
+    defaultViewMode: 'last', // last | list | dense | compact | tiles | grid-sm | grid | grid-lg | grid-xl
+    rememberFolderView: true,
     startupMode: 'pc', // pc | last | custom
     startupPath: '',
     clickMode: 'double', // double | single
@@ -433,6 +444,11 @@ async function navigateTo(targetPath, { pushHistory = true, forceRefresh = false
   state.lastClickedIndex = -1;
   if (!isSameTarget || pushHistory) {
     state.filterOnlyMatched = false;
+    state.relatedCtx = null;
+    $('related-bar')?.classList.add('hidden');
+    for (const set of Object.values(state.colFilters)) set.clear();
+    closeColFilterPopover();
+    updateListHeaderIndicators();
     $('btn-flt-clear-view').classList.add('hidden');
     $('search-input').value = '';
     state.searchQuery = '';
@@ -471,8 +487,8 @@ async function navigateTo(targetPath, { pushHistory = true, forceRefresh = false
   $('explorer-view').classList.remove('hidden');
   const isTrash = targetPath === 'TRASH';
   $('trash-bar').classList.toggle('hidden', !isTrash);
-  const dateHeader = document.querySelector('#list-header .lh-date');
-  if (dateHeader) dateHeader.textContent = isTrash ? 'Silinme tarihi' : 'Değiştirme tarihi';
+  const dateHeaderLabel = document.querySelector('#list-header .lh-date .lh-label');
+  if (dateHeaderLabel) dateHeaderLabel.textContent = isTrash ? 'Silinme tarihi' : 'Değiştirme tarihi';
 
   const reqTabId = tab.id;
   try {
@@ -508,6 +524,13 @@ async function navigateTo(targetPath, { pushHistory = true, forceRefresh = false
     }
 
     state.rawItems = data.items;
+    if (!isTrash) {
+      applyViewModeForFolder(data.path);
+    } else {
+      const vmSel = $('view-mode');
+      state.viewMode = 'list';
+      if (vmSel) vmSel.value = 'list';
+    }
     $('status-timing').textContent = isTrash
       ? `${data.durationMs} ms (Çöp Kutusu)`
       : `${data.durationMs} ms (0 ön-okuma)`;
@@ -697,6 +720,107 @@ function createTreeNodeElement({ name, path, iconHtml, extraHtml = '', unpinHand
   return node;
 }
 
+function getDriveRoot(p) {
+  const m = /^([a-zA-Z]:)/.exec(String(p || '').trim());
+  return m ? m[1].toLowerCase() : '';
+}
+
+function isCrossDriveTransfer(paths, targetDir) {
+  const dstDrive = getDriveRoot(targetDir);
+  if (!dstDrive || !Array.isArray(paths) || paths.length === 0) return false;
+  return paths.some((p) => {
+    const srcDrive = getDriveRoot(p);
+    return srcDrive && srcDrive !== dstDrive;
+  });
+}
+
+// Windows Dosya Gezgini kuralı: aynı diskte varsayılan Taşı, farklı diske varsayılan Kopyala
+function resolveDragOp(paths, targetDir, ctrlKey = false, shiftKey = false) {
+  if (isCrossDriveTransfer(paths, targetDir)) {
+    return (shiftKey && !ctrlKey) ? 'move' : 'copy';
+  }
+  return ctrlKey ? 'copy' : 'move';
+}
+
+function loadRecentTransferTargets() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('ld_recent_transfer_targets') || '[]');
+    if (Array.isArray(raw)) {
+      state.recentTransferTargets = raw.filter((x) => x && x.path).slice(0, 15);
+    }
+  } catch {
+    state.recentTransferTargets = [];
+  }
+}
+
+function saveRecentTransferTargets() {
+  try {
+    localStorage.setItem('ld_recent_transfer_targets', JSON.stringify((state.recentTransferTargets || []).slice(0, 15)));
+  } catch {}
+}
+
+function recordRecentTransferTarget(destDir) {
+  if (!destDir || destDir === 'PC' || destDir === 'TRASH') return;
+  let clean = String(destDir).trim().replace(/\\+$/, '');
+  if (/^[a-zA-Z]:$/.test(clean)) clean += '\\';
+  const low = clean.toLowerCase();
+  const list = (state.recentTransferTargets || []).filter((x) => String(x.path || '').toLowerCase() !== low);
+  list.unshift({
+    path: clean,
+    name: getFolderTitle(clean) || clean,
+    usedAt: Date.now(),
+  });
+  if (list.length > 15) list.length = 15;
+  state.recentTransferTargets = list;
+  saveRecentTransferTargets();
+  renderRecentTransferTargets();
+}
+
+function renderRecentTransferTargets() {
+  const listEl = $('sb-recent-targets-list');
+  const cntEl = $('sb-recent-targets-count');
+  const chevEl = $('sb-recent-targets-chevron');
+  if (!listEl) return;
+
+  const items = state.recentTransferTargets || [];
+  if (cntEl) cntEl.textContent = String(items.length);
+  if (chevEl) chevEl.textContent = state.recentTargetsOpen ? '▾' : '▸';
+  listEl.classList.toggle('hidden', !state.recentTargetsOpen);
+
+  listEl.innerHTML = '';
+  if (items.length === 0) {
+    listEl.innerHTML = '<div class="muted-text" style="padding:4px 10px;font-size:11.5px;">Henüz hedef klasör yok (dosya taşıdıkça/kopyaladıkça dolacak)</div>';
+    return;
+  }
+
+  for (const entry of items) {
+    const row = document.createElement('div');
+    row.className = 'sidebar-item tree-row sb-recent-target-row';
+    row.dataset.path = entry.path;
+    row.title = `${entry.path}\n• Dosya bırak: Taşı / Farklı diske Kopyala\n• Tıkla: Klasörü aç`;
+    row.innerHTML = `
+      <span class="sb-icon">📁</span>
+      <div class="sb-recent-target-meta">
+        <span class="sb-label">${esc(entry.name || getFolderTitle(entry.path))}</span>
+        <span class="sb-recent-target-sub">${esc(entry.path)}</span>
+      </div>
+      <button type="button" class="sb-unpin sb-recent-del-btn" title="Listeden çıkar">✕</button>
+    `;
+    row.onclick = (e) => {
+      if (e.target.closest('.sb-recent-del-btn')) {
+        e.stopPropagation();
+        const low = String(entry.path).toLowerCase();
+        state.recentTransferTargets = state.recentTransferTargets.filter((x) => String(x.path || '').toLowerCase() !== low);
+        saveRecentTransferTargets();
+        renderRecentTransferTargets();
+        return;
+      }
+      navigateTo(entry.path);
+    };
+    listEl.appendChild(row);
+  }
+}
+
 function renderSidebarAndDashboard() {
   // Hızlı Erişim
   const qaList = $('quick-access-list');
@@ -800,6 +924,8 @@ function renderSidebarAndDashboard() {
     };
     dGrid.appendChild(card);
   }
+
+  renderRecentTransferTargets();
 
   // Çift Panel hızlı hedef seçici
   const dualSel = $('dual-quick-select');
@@ -911,6 +1037,405 @@ function itemMatchesCriteria(item, rowIndex1Based, c) {
   return true;
 }
 
+// ---------- Sütun Genişlikleri, Klasöre Özel Görünüm & Başlık Filtreleri ----------
+const COL_LIMITS = {
+  name: { cssVar: '--col-name', def: 'minmax(220px, 1fr)', min: 120, max: 1400 },
+  mtime: { cssVar: '--col-date', def: '150px', min: 100, max: 420 },
+  ext: { cssVar: '--col-type', def: '110px', min: 70, max: 360 },
+  size: { cssVar: '--col-size', def: '95px', min: 65, max: 280 },
+};
+
+function applyColumnWidths() {
+  const rootStyle = document.documentElement.style;
+  for (const [col, meta] of Object.entries(COL_LIMITS)) {
+    const val = state.colWidths[col];
+    if (Number.isFinite(val) && val >= meta.min && val <= meta.max) {
+      rootStyle.setProperty(meta.cssVar, `${Math.round(val)}px`);
+    } else {
+      rootStyle.setProperty(meta.cssVar, meta.def);
+    }
+  }
+  const hasExplicitName = Number.isFinite(state.colWidths.name)
+    && state.colWidths.name >= COL_LIMITS.name.min
+    && state.colWidths.name <= COL_LIMITS.name.max;
+  if (hasExplicitName) {
+    const datePx = (Number.isFinite(state.colWidths.mtime) && state.colWidths.mtime >= COL_LIMITS.mtime.min)
+      ? state.colWidths.mtime : 150;
+    const typePx = (Number.isFinite(state.colWidths.ext) && state.colWidths.ext >= COL_LIMITS.ext.min)
+      ? state.colWidths.ext : 110;
+    const sizePx = (Number.isFinite(state.colWidths.size) && state.colWidths.size >= COL_LIMITS.size.min)
+      ? state.colWidths.size : 95;
+    // padding (10+10) + chk (32) + eye (40) = 92 px
+    const totalRowWidth = Math.round(92 + state.colWidths.name + datePx + typePx + sizePx);
+    rootStyle.setProperty('--list-row-width', `${totalRowWidth}px`);
+  } else {
+    rootStyle.setProperty('--list-row-width', '100%');
+  }
+}
+
+function saveColumnWidths() {
+  try {
+    localStorage.setItem('ld_col_widths', JSON.stringify(state.colWidths));
+  } catch {}
+}
+
+function loadColumnWidths() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('ld_col_widths') || 'null');
+    if (raw && typeof raw === 'object') {
+      for (const col of Object.keys(COL_LIMITS)) {
+        const n = Number(raw[col]);
+        state.colWidths[col] = (raw[col] !== null && Number.isFinite(n)) ? n : null;
+      }
+    }
+  } catch {}
+  applyColumnWidths();
+}
+
+function resetColumnWidths() {
+  state.colWidths = { name: null, mtime: null, ext: null, size: null };
+  saveColumnWidths();
+  applyColumnWidths();
+  toast('Liste sütun genişlikleri varsayılana sıfırlandı', 'success');
+}
+
+function setupListColumnResizers() {
+  document.querySelectorAll('#list-header .lh-resizer[data-col]').forEach((handle) => {
+    const col = handle.dataset.col;
+    const meta = COL_LIMITS[col];
+    if (!meta) return;
+
+    handle.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      state.colWidths[col] = null;
+      saveColumnWidths();
+      applyColumnWidths();
+      state.suppressHeaderSortUntil = Date.now() + 250;
+    });
+
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const cell = handle.closest('.lh-cell');
+      if (!cell) return;
+      const startX = e.clientX;
+      const startWidth = cell.getBoundingClientRect().width;
+      handle.classList.add('dragging');
+      document.body.classList.add('col-resizing');
+
+      const onMove = (mv) => {
+        const nextW = Math.max(meta.min, Math.min(meta.max, Math.round(startWidth + (mv.clientX - startX))));
+        state.colWidths[col] = nextW;
+        applyColumnWidths();
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        handle.classList.remove('dragging');
+        document.body.classList.remove('col-resizing');
+        state.suppressHeaderSortUntil = Date.now() + 250;
+        saveColumnWidths();
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+  });
+}
+
+function normalizeFolderKey(p) {
+  if (!p) return '';
+  let clean = String(p).trim().replace(/\\+$/, '');
+  if (/^[a-zA-Z]:$/.test(clean)) clean += '\\';
+  return clean.toLowerCase();
+}
+
+function loadFolderViews() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('ld_folder_views') || '{}');
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      state.folderViews = raw;
+    }
+  } catch {
+    state.folderViews = {};
+  }
+}
+
+function saveFolderViews() {
+  try {
+    const keys = Object.keys(state.folderViews);
+    if (keys.length > 500) {
+      const trimmed = {};
+      for (const k of keys.slice(-500)) trimmed[k] = state.folderViews[k];
+      state.folderViews = trimmed;
+    }
+    localStorage.setItem('ld_folder_views', JSON.stringify(state.folderViews));
+  } catch {}
+}
+
+function applyViewModeForFolder(folderPath) {
+  const sel = $('view-mode');
+  const isValidMode = (vm) => Boolean(vm && sel && sel.querySelector(`option[value="${vm}"]`));
+  let nextMode = null;
+
+  if (state.settings.rememberFolderView !== false && folderPath && folderPath !== 'PC' && folderPath !== 'TRASH') {
+    const remembered = state.folderViews[normalizeFolderKey(folderPath)];
+    if (isValidMode(remembered)) nextMode = remembered;
+  }
+  if (!nextMode) {
+    const def = state.settings.defaultViewMode;
+    if (def && def !== 'last' && isValidMode(def)) {
+      nextMode = def;
+    } else if (isValidMode(state.globalViewMode)) {
+      nextMode = state.globalViewMode;
+    } else {
+      nextMode = 'list';
+    }
+  }
+  state.viewMode = nextMode;
+  if (sel) sel.value = nextMode;
+}
+
+function hasActiveColFilters() {
+  return Object.values(state.colFilters).some((s) => s && s.size > 0);
+}
+
+function clearColFilters(col = null) {
+  if (col && state.colFilters[col]) {
+    state.colFilters[col].clear();
+  } else {
+    for (const set of Object.values(state.colFilters)) set.clear();
+  }
+  updateListHeaderIndicators();
+  applySortAndFilter();
+}
+
+function updateListHeaderIndicators() {
+  document.querySelectorAll('#list-header .lh-cell[data-sort]').forEach((cell) => {
+    const col = cell.dataset.col || cell.dataset.sort;
+    const arrow = cell.querySelector('.lh-sort-arrow');
+    if (arrow) {
+      arrow.textContent = state.sortBy === cell.dataset.sort ? (state.sortDir === 'asc' ? '▲' : '▼') : '';
+    }
+    const btn = cell.querySelector('.lh-filter-btn');
+    if (btn && state.colFilters[col]) {
+      btn.classList.toggle('active', state.colFilters[col].size > 0);
+    }
+  });
+}
+
+function getNameBucketKey(name) {
+  const ch = String(name || '').trim().charAt(0).toLocaleLowerCase('tr-TR');
+  if (!ch || !/[a-zçğıİöşü]/i.test(ch)) return '0-9';
+  if ('abcdefç'.includes(ch)) return 'A-F';
+  if ('gğhıijk'.includes(ch)) return 'G-K';
+  if ('lmnoöprs'.includes(ch)) return 'L-R';
+  return 'S-Z';
+}
+
+function getDateBucketKey(ts) {
+  if (!ts || ts <= 0) return 'older';
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (ts >= startToday) return 'today';
+  if (ts >= startToday - 7 * 86400000) return 'week';
+  if (ts >= startToday - 30 * 86400000) return 'month';
+  if (ts >= new Date(now.getFullYear(), 0, 1).getTime()) return 'year';
+  return 'older';
+}
+
+function getTypeBucketKey(item) {
+  if (item.isDir) return 'FOLDER';
+  return (item.ext || '').toLowerCase() || 'NONE';
+}
+
+function getSizeBucketKey(item) {
+  const s = item.size || 0;
+  if (s === 0) return 'empty';
+  if (s < 100 * 1024) return 'tiny';
+  if (s < 1024 * 1024) return 'small';
+  if (s < 100 * 1024 * 1024) return 'medium';
+  if (s < 1024 * 1024 * 1024) return 'large';
+  return 'huge';
+}
+
+function itemMatchesColFilters(item) {
+  if (state.colFilters.name.size > 0 && !state.colFilters.name.has(getNameBucketKey(item.name))) return false;
+  if (state.colFilters.mtime.size > 0 && !state.colFilters.mtime.has(getDateBucketKey(item.mtime))) return false;
+  if (state.colFilters.ext.size > 0 && !state.colFilters.ext.has(getTypeBucketKey(item))) return false;
+  if (state.colFilters.size.size > 0 && !state.colFilters.size.has(getSizeBucketKey(item))) return false;
+  return true;
+}
+
+function closeColFilterPopover() {
+  const pop = $('col-filter-popover');
+  state.activeFilterCol = null;
+  if (pop && typeof pop.hidePopover === 'function') {
+    try {
+      if (pop.matches(':popover-open')) pop.hidePopover();
+    } catch {}
+  }
+}
+
+function buildColumnFilterOptions(col) {
+  const items = state.rawItems || [];
+  const counts = new Map();
+  if (col === 'name') {
+    for (const it of items) {
+      const k = getNameBucketKey(it.name);
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    return [
+      { key: '0-9', label: '0 – 9 / Semboller' },
+      { key: 'A-F', label: 'A – F' },
+      { key: 'G-K', label: 'G – K' },
+      { key: 'L-R', label: 'L – R' },
+      { key: 'S-Z', label: 'S – Z' },
+    ].map((o) => ({ ...o, count: counts.get(o.key) || 0 })).filter((o) => o.count > 0 || state.colFilters.name.has(o.key));
+  }
+  if (col === 'mtime') {
+    for (const it of items) {
+      const k = getDateBucketKey(it.mtime);
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    return [
+      { key: 'today', label: 'Bugün' },
+      { key: 'week', label: 'Son 7 gün' },
+      { key: 'month', label: 'Son 30 gün' },
+      { key: 'year', label: 'Bu yıl' },
+      { key: 'older', label: 'Daha eski' },
+    ].map((o) => ({ ...o, count: counts.get(o.key) || 0 })).filter((o) => o.count > 0 || state.colFilters.mtime.has(o.key));
+  }
+  if (col === 'ext') {
+    for (const it of items) {
+      const k = getTypeBucketKey(it);
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => {
+        if (a[0] === 'FOLDER') return -1;
+        if (b[0] === 'FOLDER') return 1;
+        return b[1] - a[1] || a[0].localeCompare(b[0]);
+      })
+      .map(([key, count]) => ({
+        key,
+        label: key === 'FOLDER' ? '📁 Dosya klasörü' : (key === 'NONE' ? 'Uzantısız Dosya' : key.toUpperCase().replace('.', '')),
+        count,
+      }));
+  }
+  for (const it of items) {
+    const k = getSizeBucketKey(it);
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  return [
+    { key: 'empty', label: 'Boş / Hesaplanmamış (0 B)' },
+    { key: 'tiny', label: 'Çok küçük (< 100 KB)' },
+    { key: 'small', label: 'Küçük (100 KB – 1 MB)' },
+    { key: 'medium', label: 'Orta (1 MB – 100 MB)' },
+    { key: 'large', label: 'Büyük (100 MB – 1 GB)' },
+    { key: 'huge', label: 'Çok büyük (> 1 GB)' },
+  ].map((o) => ({ ...o, count: counts.get(o.key) || 0 })).filter((o) => o.count > 0 || state.colFilters.size.has(o.key));
+}
+
+function openColFilterPopover(col, anchorBtn) {
+  const pop = $('col-filter-popover');
+  if (!pop || !anchorBtn) return;
+
+  if (state.activeFilterCol === col && pop.matches(':popover-open')) {
+    closeColFilterPopover();
+    return;
+  }
+
+  state.activeFilterCol = col;
+  const sortLabels = {
+    name: ['A → Z (Artan)', 'Z → A (Azalan)'],
+    mtime: ['Eskiden Yeniye', 'Yeniden Eskiye'],
+    ext: ['Türe Göre (A → Z)', 'Türe Göre (Z → A)'],
+    size: ['Küçükten Büyüğe', 'Büyükten Küçüğe'],
+  };
+  const labels = sortLabels[col] || ['Artan', 'Azalan'];
+  const opts = buildColumnFilterOptions(col);
+  const selectedSet = state.colFilters[col];
+
+  pop.innerHTML = `
+    <div class="cfp-sort-group">
+      <button type="button" class="cfp-sort-btn ${state.sortBy === col && state.sortDir === 'asc' ? 'active' : ''}" data-sort-dir="asc">
+        <span>${esc(labels[0])}</span><span>▲</span>
+      </button>
+      <button type="button" class="cfp-sort-btn ${state.sortBy === col && state.sortDir === 'desc' ? 'active' : ''}" data-sort-dir="desc">
+        <span>${esc(labels[1])}</span><span>▼</span>
+      </button>
+    </div>
+    <div class="cfp-sep"></div>
+    <div class="cfp-list">
+      ${opts.length === 0 ? '<div class="muted-text" style="padding:6px 8px;">Filtrelenecek öğe yok.</div>' : opts.map((o) => `
+        <label class="cfp-opt">
+          <input type="checkbox" value="${esc(o.key)}" ${selectedSet.has(o.key) ? 'checked' : ''} />
+          <span class="cfp-opt-label">${esc(o.label)}</span>
+          <span class="cfp-count">${o.count}</span>
+        </label>
+      `).join('')}
+    </div>
+    <div class="cfp-sep"></div>
+    <div class="cfp-footer">
+      <button type="button" class="cmd-btn" data-act="clear-col" ${selectedSet.size === 0 ? 'disabled' : ''}>Bu Sütunu Temizle</button>
+      ${hasActiveColFilters() ? '<button type="button" class="cmd-btn danger-hover" data-act="clear-all">Tümünü Sıfırla</button>' : ''}
+    </div>
+  `;
+
+  pop.querySelectorAll('.cfp-sort-btn').forEach((btn) => {
+    btn.onclick = () => {
+      state.sortBy = col;
+      state.sortDir = btn.dataset.sortDir;
+      $('sort-by').value = col;
+      $('btn-sort-dir').textContent = state.sortDir === 'asc' ? '▲' : '▼';
+      saveUiPrefs();
+      applySortAndFilter();
+      closeColFilterPopover();
+    };
+  });
+
+  pop.querySelectorAll('.cfp-opt input[type="checkbox"]').forEach((chk) => {
+    chk.onchange = () => {
+      if (chk.checked) selectedSet.add(chk.value);
+      else selectedSet.delete(chk.value);
+      const clrCol = pop.querySelector('[data-act="clear-col"]');
+      if (clrCol) clrCol.disabled = selectedSet.size === 0;
+      applySortAndFilter();
+    };
+  });
+
+  const btnClrCol = pop.querySelector('[data-act="clear-col"]');
+  if (btnClrCol) {
+    btnClrCol.onclick = () => {
+      clearColFilters(col);
+      closeColFilterPopover();
+    };
+  }
+  const btnClrAll = pop.querySelector('[data-act="clear-all"]');
+  if (btnClrAll) {
+    btnClrAll.onclick = () => {
+      clearColFilters(null);
+      closeColFilterPopover();
+    };
+  }
+
+  pop.style.left = '-9999px';
+  pop.style.top = '-9999px';
+  pop.showPopover();
+
+  const rect = anchorBtn.getBoundingClientRect();
+  const pw = pop.offsetWidth || 230;
+  const ph = pop.offsetHeight || 240;
+  const left = Math.max(8, Math.min(window.innerWidth - pw - 8, rect.right - pw));
+  const top = Math.max(8, Math.min(window.innerHeight - ph - 8, rect.bottom + 4));
+  pop.style.left = `${left}px`;
+  pop.style.top = `${top}px`;
+}
+
 function sortItemsArray(arr) {
   const by = state.sortBy;
   const dir = state.sortDir === 'asc' ? 1 : -1;
@@ -937,6 +1462,11 @@ function applySortAndFilter() {
     list = list.filter((it) => it.name.toLowerCase().includes(q));
   }
 
+  // Başlık çentik sütun filtreleri
+  if (hasActiveColFilters()) {
+    list = list.filter(itemMatchesColFilters);
+  }
+
   // Gelişmiş Aralık Stüdyosu filtresi
   if (state.filterOnlyMatched) {
     try {
@@ -946,6 +1476,9 @@ function applySortAndFilter() {
       toast(err.message, 'error');
     }
   }
+
+  $('btn-flt-clear-view').classList.toggle('hidden', !state.filterOnlyMatched && !hasActiveColFilters());
+  updateListHeaderIndicators();
 
   state.viewItems = list;
   updateStudioMatchPreview();
@@ -1078,9 +1611,11 @@ function renderVirtualList() {
       const iconHtml = thumbSrc
         ? `<img class="fr-thumb" src="${thumbSrc}" loading="lazy" alt="" />`
         : `<span class="fr-icon">${ICONS[item.category] || ICONS.other}</span>`;
-      const origDirHtml = item.inTrash && item.origDir
+      const origDirHtml = (item.inTrash && item.origDir)
         ? `<span class="fr-orig-dir muted-text" title="Özgün Konum: ${esc(item.origPath || item.origDir)}">${esc(item.origDir)}</span>`
-        : '';
+        : ((state.relatedCtx && state.relatedCtx.scope !== 'folder' && item.parentDir)
+          ? `<span class="fr-orig-dir muted-text" title="${esc(item.parentDir)}">${esc(item.parentDir)}</span>`
+          : '');
 
       const isBasket = state.basket.has(item.path);
       const basketInline = isBasket ? '<span class="basket-inline-badge" title="Sepette">🧺<span class="basket-check">✓</span></span>' : '';
@@ -1286,11 +1821,16 @@ function updateToolbarButtons() {
   $('btn-pin').disabled = !inFolder;
   $('btn-cut').disabled = !inFolder || !hasSel;
   $('btn-copy').disabled = !inFolder || !hasSel;
-  $('btn-paste').disabled = !inFolder || !hasClip;
+  $('btn-paste').disabled = !inFolder;
   $('btn-rename').disabled = !inFolder || !hasSel;
   $('btn-delete').disabled = !(tab && tab.path !== 'PC' && hasSel);
   const propsBtn = $('btn-properties');
   if (propsBtn) propsBtn.disabled = !inFolder;
+  const relBtn = $('btn-find-related');
+  if (relBtn) {
+    const selList = inFolder && state.selectedPaths.size === 1 ? getSelectedItems() : [];
+    relBtn.disabled = !(selList.length === 1 && !selList[0].isDir);
+  }
 
   const restoreBtn = $('btn-trash-restore');
   const permBtn = $('btn-trash-perm-delete');
@@ -1508,6 +2048,211 @@ function renderQuickLookStage(item) {
   $('btn-ql-open-ext').onclick = () => openExternally(item.path);
   const revBtn = $('btn-ql-reveal');
   if (revBtn) revBtn.onclick = () => revealInExplorer(item.path);
+  const relQlBtn = $('btn-ql-related');
+  if (relQlBtn) relQlBtn.onclick = () => openRelatedDialog(item);
+}
+
+const MONTH_NAMES_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+const GENERIC_REL_WORDS = new Set(['vid', 'img', 'dsc', 'dcim', 'pxl', 'mvimg', 'wa', 'snap', 'screenshot', 'screen', 'recording', 'rec', 'video', 'photo', 'foto', 'resim', 'image', 'copy', 'kopya', 'mp4', 'jpg', 'jpeg', 'png', 'mov', 'mkv', 'webm']);
+
+function parseClientRefTime(item) {
+  const name = String(item?.name || '');
+  let m = /(?:^|[^\d])((?:199\d|20\d\d))(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[_\-\s]?([01]\d|2[0-3])([0-5]\d)([0-5]\d)(?:[^\d]|$)/.exec(name);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])).getTime();
+  m = /(?:^|[^\d])((?:199\d|20\d\d))[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?:[^\d]|$)/.exec(name);
+  if (m && !(item?.mtime > 0)) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0).getTime();
+  return item?.mtime || Date.now();
+}
+
+function getClientNameTokensPreview(name) {
+  const stem = String(name || '').replace(/\.[^.]+$/, '');
+  const spaced = stem.replace(/([a-zçğıöşü])([A-ZÇĞİÖŞÜ])/g, '$1 $2');
+  const words = spaced.toLocaleLowerCase('tr-TR').split(/[^a-zçğıöşü0-9]+/i).filter((w) => {
+    if (w.length < 3) return false;
+    if (GENERIC_REL_WORDS.has(w) || GENERIC_REL_WORDS.has(w.replace(/ı/g, 'i'))) return false;
+    if (/^\d+$/.test(w) && (w.length < 8 || w.length === 6)) return false;
+    return true;
+  });
+  return Array.from(new Set(words)).slice(0, 5);
+}
+
+function openRelatedDialog(item) {
+  if (!item || item.isDir) return;
+  const dlg = $('related-dialog');
+  if (!dlg) return;
+  dlg._targetItem = item;
+  const refMs = parseClientRefTime(item);
+  const dt = new Date(refMs);
+  const dateStr = dt.toLocaleDateString('tr-TR');
+  const timeStr = dt.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  const tokens = getClientNameTokensPreview(item.name);
+
+  $('related-dlg-sub').textContent = `${item.name} • Tarih: ${dateStr} ${timeStr}`;
+  $('rel-desc-nearTime').textContent = `${dateStr} • ${timeStr} civarı (±1 saat)`;
+  $('rel-desc-sameDay').textContent = `${dateStr} günündeki tüm kayıtlar`;
+  $('rel-desc-sameWeek').textContent = `${dateStr} merkezli ±3 gün aralığı`;
+  $('rel-desc-sameMonth').textContent = `${MONTH_NAMES_TR[dt.getMonth()]} ${dt.getFullYear()} ayındaki dosyalar`;
+  $('rel-desc-similarName').textContent = tokens.length > 0
+    ? `Anahtar kelimeler: ${tokens.join(', ')}`
+    : `Dosya adı başlangıcıyla eşleşen seri dosyalar`;
+
+  if (state.relatedCtx) {
+    if ($('rel-dlg-scope')) $('rel-dlg-scope').value = state.relatedCtx.scope || 'folder';
+    if ($('rel-dlg-cat')) $('rel-dlg-cat').value = state.relatedCtx.sameCategoryOnly || 'media';
+  }
+  if (!dlg.open) dlg.showModal();
+}
+
+function updateRelatedBarUi() {
+  const bar = $('related-bar');
+  const ctx = state.relatedCtx;
+  if (!bar) return;
+  if (!ctx) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+  const modeNames = {
+    nearTime: '±1 Saat',
+    sameDay: 'Aynı Gün',
+    sameWeek: '±3 Gün',
+    sameMonth: 'Aynı Ay',
+    similarName: 'Benzer İsim',
+  };
+  $('related-bar-title').textContent = `✨ ${ctx.item.name}`;
+  $('related-bar-summary').textContent = `${modeNames[ctx.mode] || ctx.mode} • ${state.rawItems.length} eşleşme (${ctx.durationMs || 0} ms)`;
+  bar.querySelectorAll('.rel-mode-btn[data-rel-mode]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.relMode === ctx.mode);
+  });
+  if ($('related-bar-scope')) $('related-bar-scope').value = ctx.scope;
+  if ($('related-bar-cat')) $('related-bar-cat').value = ctx.sameCategoryOnly;
+}
+
+async function runRelatedSearch({ item, mode = 'sameDay', scope = 'folder', sameCategoryOnly = 'media' }) {
+  if (!item || item.isDir) return;
+  const relDlg = $('related-dialog');
+  if (relDlg && relDlg.open) relDlg.close();
+  if ($('quicklook-dialog')?.open) closeQuickLook();
+
+  const tab = getActiveTab();
+  const returnPath = (state.relatedCtx && state.relatedCtx.returnPath) || (tab && tab.path) || 'PC';
+
+  $('pc-dashboard').classList.add('hidden');
+  $('analyzer-view').classList.add('hidden');
+  $('trash-bar').classList.add('hidden');
+  $('explorer-view').classList.remove('hidden');
+
+  try {
+    const data = await api('/api/related', {
+      method: 'POST',
+      body: JSON.stringify({
+        filePath: item.path,
+        fileName: item.name,
+        mtime: item.mtime,
+        category: item.category,
+        mode,
+        scope,
+        sameCategoryOnly,
+      }),
+    });
+    state.relatedCtx = {
+      item,
+      mode,
+      scope: data.scopeUsed || scope,
+      sameCategoryOnly,
+      returnPath,
+      durationMs: data.durationMs || 0,
+    };
+    state.rawItems = data.items || [];
+    state.selectedPaths.clear();
+    state.selectedPaths.add(item.path);
+    updateRelatedBarUi();
+    applySortAndFilter();
+    updateToolbarButtons();
+    const vp = $('virtual-viewport');
+    if (vp) vp.scrollTop = 0;
+    if (state.thumbMode === 'viewport' || state.thumbMode === 'all') scheduleThumbBatch();
+    $('status-timing').textContent = `${data.durationMs} ms (${data.source === 'sqlite' ? 'SQLite İndeks' : 'Canlı Klasör'})`;
+    if (data.fallbackNotice) toast(data.fallbackNotice, 'info');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function exitRelatedMode() {
+  const ctx = state.relatedCtx;
+  state.relatedCtx = null;
+  $('related-bar')?.classList.add('hidden');
+  if (ctx && ctx.returnPath && ctx.returnPath !== 'PC' && ctx.returnPath !== 'TRASH') {
+    navigateTo(ctx.returnPath, { pushHistory: false, forceRefresh: false });
+  } else {
+    const tab = getActiveTab();
+    navigateTo(tab ? tab.path : 'PC', { pushHistory: false });
+  }
+}
+
+function bindRelatedHandlers() {
+  const btnToolbarRel = $('btn-find-related');
+  if (btnToolbarRel) {
+    btnToolbarRel.onclick = () => {
+      const sel = getSelectedItems();
+      if (sel.length === 1 && !sel[0].isDir) openRelatedDialog(sel[0]);
+    };
+  }
+  const btnDlgClose = $('btn-rel-dlg-close');
+  if (btnDlgClose) btnDlgClose.onclick = () => $('related-dialog').close();
+
+  document.querySelectorAll('#related-dialog .rel-card[data-rel-pick]').forEach((card) => {
+    card.onclick = () => {
+      const dlg = $('related-dialog');
+      const item = dlg && dlg._targetItem;
+      if (!item) return;
+      runRelatedSearch({
+        item,
+        mode: card.dataset.relPick,
+        scope: $('rel-dlg-scope')?.value || 'folder',
+        sameCategoryOnly: $('rel-dlg-cat')?.value || 'media',
+      });
+    };
+  });
+
+  document.querySelectorAll('#related-bar .rel-mode-btn[data-rel-mode]').forEach((btn) => {
+    btn.onclick = () => {
+      if (!state.relatedCtx) return;
+      runRelatedSearch({
+        item: state.relatedCtx.item,
+        mode: btn.dataset.relMode,
+        scope: $('related-bar-scope')?.value || state.relatedCtx.scope,
+        sameCategoryOnly: $('related-bar-cat')?.value || state.relatedCtx.sameCategoryOnly,
+      });
+    };
+  });
+  const barScope = $('related-bar-scope');
+  if (barScope) {
+    barScope.onchange = () => {
+      if (!state.relatedCtx) return;
+      runRelatedSearch({
+        item: state.relatedCtx.item,
+        mode: state.relatedCtx.mode,
+        scope: barScope.value,
+        sameCategoryOnly: $('related-bar-cat')?.value || state.relatedCtx.sameCategoryOnly,
+      });
+    };
+  }
+  const barCat = $('related-bar-cat');
+  if (barCat) {
+    barCat.onchange = () => {
+      if (!state.relatedCtx) return;
+      runRelatedSearch({
+        item: state.relatedCtx.item,
+        mode: state.relatedCtx.mode,
+        scope: $('related-bar-scope')?.value || state.relatedCtx.scope,
+        sameCategoryOnly: barCat.value,
+      });
+    };
+  }
+  const btnBarClose = $('btn-related-close');
+  if (btnBarClose) btnBarClose.onclick = exitRelatedMode;
 }
 
 function releaseQuickLookMedia() {
@@ -1531,14 +2276,21 @@ function closeQuickLook() {
 function triageQuickLookBasket() {
   const item = state.qlMediaItems[state.qlIndex];
   if (!item) return;
-  if (!state.basket.has(item.path)) {
-    state.basket.set(item.path, item);
+  if (state.basket.has(item.path)) {
+    state.basket.delete(item.path);
     renderBasket();
+    updateQuickLookBasketBadge(item);
+    toast(`${item.name} sepetten çıkarıldı`);
+    return;
   }
+  state.basket.set(item.path, item);
+  renderBasket();
   toast(`${item.name} sepete eklendi`);
   if (state.qlIndex < state.qlMediaItems.length - 1) {
     state.qlIndex++;
     renderQuickLookStage(state.qlMediaItems[state.qlIndex]);
+  } else {
+    updateQuickLookBasketBadge(item);
   }
 }
 
@@ -1598,6 +2350,14 @@ async function openExternally(filePath) {
   try {
     const matched = state.viewItems.find((x) => x.path === filePath) || state.dualItems.find((x) => x.path === filePath);
     recordRecentFile(matched || filePath);
+    const fileName = String(filePath || '').split(/[/\\]/).pop() || filePath;
+    if (/\.(bat|cmd|ps1|exe|msi)$/i.test(fileName)) {
+      toast(`🚀 Çalıştırılıyor: ${fileName}`);
+    }
+    if (window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessage === 'function') {
+      window.chrome.webview.postMessage({ type: 'openExternal', path: filePath });
+      return;
+    }
     await api('/api/fs/action', { method: 'POST', body: JSON.stringify({ action: 'open', path: filePath }) });
   } catch (err) {
     toast(err.message, 'error');
@@ -1851,6 +2611,33 @@ async function performUndo() {
 }
 
 let propsReqSeq = 0;
+async function copyTextSafe(text, toastMsg = 'Panoya kopyalandı') {
+  const val = String(text ?? '');
+  if (!val) return false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(val);
+      if (toastMsg) toast(toastMsg, 'success');
+      return true;
+    }
+  } catch {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = val;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (ok && toastMsg) toast(toastMsg, 'success');
+    return ok;
+  } catch {
+    toast('Panoya kopyalanamadı', 'error');
+    return false;
+  }
+}
+
 async function showPropertiesModal(overridePaths = null) {
   const tab = getActiveTab();
   const targetPaths = (overridePaths && overridePaths.length > 0)
@@ -1872,10 +2659,13 @@ async function showPropertiesModal(overridePaths = null) {
   const copyBtn = $('btn-props-copy-path');
   const revBtn = $('btn-props-reveal');
   if (copyBtn) {
-    copyBtn.onclick = () => {
-      navigator.clipboard.writeText(targetPaths.join('\n'));
-      toast('Yol kopyalandı');
-    };
+    copyBtn.textContent = targetPaths.length === 1
+      ? '🔗 Tam Yolu Kopyala'
+      : `🔗 Tüm Yolları Kopyala (${targetPaths.length})`;
+    copyBtn.onclick = () => copyTextSafe(
+      targetPaths.join('\n'),
+      targetPaths.length === 1 ? 'Tam yol kopyalandı' : `${targetPaths.length} dosya yolu kopyalandı`
+    );
   }
   if (revBtn) {
     revBtn.disabled = targetPaths.length !== 1;
@@ -1902,19 +2692,29 @@ async function showPropertiesModal(overridePaths = null) {
       : `${data.selectedFolders} klasör, ${data.selectedFiles} dosya`;
 
     const rows = [
-      ['Tür', typeText],
-      ['Konum', single ? single.dir : data.commonDir],
-      ...(single ? [['Tam Yol', single.path]] : []),
-      ['Toplam Boyut', `<span class="props-size-strong">${formatBytes(data.totalBytes)}</span> (${exactBytes} bayt)`],
+      { lbl: 'Tür', val: typeText },
+      { lbl: 'Konum', val: single ? single.dir : data.commonDir, copyLabel: 'Konum kopyalandı' },
+      ...(single ? [{ lbl: 'Tam Yol', val: single.path, copyLabel: 'Tam yol kopyalandı' }] : []),
+      { lbl: 'Toplam Boyut', html: `<span class="props-size-strong">${formatBytes(data.totalBytes)}</span> (${exactBytes} bayt)` },
     ];
     if (!single || single.isDir) {
-      rows.push(['İçerik', `${(data.totalFiles || 0).toLocaleString('tr-TR')} Dosya, ${(data.totalFolders || 0).toLocaleString('tr-TR')} Klasör`]);
+      rows.push({ lbl: 'İçerik', val: `${(data.totalFiles || 0).toLocaleString('tr-TR')} Dosya, ${(data.totalFolders || 0).toLocaleString('tr-TR')} Klasör` });
     }
-    if (data.minCtime > 0) rows.push(['Oluşturma', formatDate(data.minCtime)]);
-    if (data.maxMtime > 0) rows.push(['Değiştirme', formatDate(data.maxMtime)]);
-    if (data.maxAtime > 0) rows.push(['Son Erişim', formatDate(data.maxAtime)]);
+    if (data.minCtime > 0) rows.push({ lbl: 'Oluşturma', val: formatDate(data.minCtime) });
+    if (data.maxMtime > 0) rows.push({ lbl: 'Değiştirme', val: formatDate(data.maxMtime) });
+    if (data.maxAtime > 0) rows.push({ lbl: 'Son Erişim', val: formatDate(data.maxAtime) });
 
-    const gridHtml = `<div class="props-grid">${rows.map(([k, v]) => `<div class="props-lbl">${esc(k)}:</div><div class="props-val">${k === 'Toplam Boyut' ? v : esc(v)}</div>`).join('')}</div>`;
+    const gridHtml = `<div class="props-grid">${rows.map((r) => {
+      let valHtml;
+      if (r.html) {
+        valHtml = r.html;
+      } else if (r.copyLabel && r.val) {
+        valHtml = `<div class="props-val-copy"><span class="props-val-text">${esc(r.val)}</span><button type="button" class="props-copy-btn" data-copy-val="${esc(r.val)}" data-copy-msg="${esc(r.copyLabel)}" title="Kopyala">📋 Kopyala</button></div>`;
+      } else {
+        valHtml = esc(r.val);
+      }
+      return `<div class="props-lbl">${esc(r.lbl)}:</div><div class="props-val">${valHtml}</div>`;
+    }).join('')}</div>`;
 
     let listHtml = '';
     if (data.items && data.items.length > 1) {
@@ -1925,12 +2725,19 @@ async function showPropertiesModal(overridePaths = null) {
             <div class="props-item-row" title="${esc(it.path)}">
               <span class="props-item-name">${ICONS[it.category] || ICONS.other} ${esc(it.name)}</span>
               <span class="props-item-meta">${it.isDir ? `${it.fileCount} dosya • ` : ''}${formatBytes(it.size)}</span>
+              <button type="button" class="props-copy-btn" data-copy-val="${esc(it.path)}" data-copy-msg="Dosya yolu kopyalandı" title="${esc(it.path)}">📋</button>
             </div>
           `).join('')}
         </div>
       `;
     }
     body.innerHTML = gridHtml + listHtml;
+    body.onclick = (e) => {
+      const btn = e.target.closest('.props-copy-btn[data-copy-val]');
+      if (!btn) return;
+      e.stopPropagation();
+      copyTextSafe(btn.dataset.copyVal, btn.dataset.copyMsg || 'Yol kopyalandı');
+    };
   } catch (err) {
     if (seq !== propsReqSeq || !dlg.open) return;
     $('props-subtitle').textContent = 'Hata';
@@ -1944,21 +2751,40 @@ function setClipboard(op, overridePaths = null) {
   state.clipboard = { op, paths };
   updateToolbarButtons();
   renderVirtualList();
+  api('/api/clipboard/os', {
+    method: 'POST',
+    body: JSON.stringify({ op, paths }),
+    silentErrors: true,
+  }).catch(() => {});
   toast(`${paths.length} öğe ${op === 'cut' ? 'kesildi' : 'kopyalandı'}`);
 }
 
 async function pasteToCurrentFolder() {
   const tab = getActiveTab();
-  if (!tab || tab.path === 'PC' || state.clipboard.paths.length === 0) return;
-  await enqueueTransfer(state.clipboard.op, state.clipboard.paths, tab.path);
-  if (state.clipboard.op === 'cut') {
-    state.clipboard = { op: null, paths: [] };
-    updateToolbarButtons();
+  if (!tab || tab.path === 'PC' || tab.path === 'TRASH') return;
+  if (state.clipboard.paths.length > 0) {
+    await enqueueTransfer(state.clipboard.op, state.clipboard.paths, tab.path);
+    if (state.clipboard.op === 'cut') {
+      state.clipboard = { op: null, paths: [] };
+      updateToolbarButtons();
+    }
+    return;
   }
+  try {
+    const osClip = await api('/api/clipboard/os', { silentErrors: true });
+    if (osClip && Array.isArray(osClip.paths) && osClip.paths.length > 0) {
+      await enqueueTransfer(osClip.op || 'copy', osClip.paths, tab.path);
+      return;
+    }
+  } catch {}
+  toast('Panoda yapıştırılacak dosya yok', 'info');
 }
 
 async function enqueueTransfer(op, sources, destDir) {
   try {
+    if ((op === 'move' || op === 'copy') && destDir) {
+      recordRecentTransferTarget(destDir);
+    }
     const res = await api('/api/transfer/enqueue', {
       method: 'POST',
       body: JSON.stringify({ op, sources, destDir, conflict: 'rename' }),
@@ -3366,6 +4192,14 @@ function bindEvents() {
   if (bcf) bcf.onclick = () => { state.recentFolders = []; saveDashHistory(); renderRecentDashboardSections(); toast('Son açılan klasörler temizlendi'); };
   const bcfi = $('btn-clear-recent-files');
   if (bcfi) bcfi.onclick = () => { state.recentFiles = []; saveDashHistory(); renderRecentDashboardSections(); toast('Son erişilen dosyalar temizlendi'); };
+  const btnRecTargets = $('btn-toggle-recent-targets');
+  if (btnRecTargets) {
+    btnRecTargets.onclick = () => {
+      state.recentTargetsOpen = !state.recentTargetsOpen;
+      saveUiPrefs();
+      renderRecentTransferTargets();
+    };
+  }
   const cmdTrash = $('btn-open-trash');
   if (cmdTrash) cmdTrash.onclick = () => navigateTo('TRASH');
   const undoBtn = $('btn-undo');
@@ -3493,7 +4327,9 @@ function bindEvents() {
     applySortAndFilter();
   };
   document.querySelectorAll('#list-header .lh-cell[data-sort]').forEach((el) => {
-    el.onclick = () => {
+    el.onclick = (e) => {
+      if (Date.now() < state.suppressHeaderSortUntil) return;
+      if (e.target.closest('.lh-filter-btn') || e.target.closest('.lh-resizer')) return;
       const col = el.dataset.sort;
       if (state.sortBy === col) state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
       else { state.sortBy = col; state.sortDir = 'asc'; }
@@ -3503,8 +4339,33 @@ function bindEvents() {
       applySortAndFilter();
     };
   });
+  document.querySelectorAll('#list-header .lh-filter-btn[data-col]').forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      openColFilterPopover(btn.dataset.col, btn);
+    };
+  });
+  setupListColumnResizers();
+  document.addEventListener('pointerdown', (e) => {
+    const pop = $('col-filter-popover');
+    if (pop && pop.matches(':popover-open')) {
+      if (!e.target.closest('#col-filter-popover') && !e.target.closest('#list-header .lh-filter-btn')) {
+        closeColFilterPopover();
+      }
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeColFilterPopover();
+  });
+
   $('view-mode').onchange = (e) => {
     state.viewMode = e.target.value;
+    state.globalViewMode = state.viewMode;
+    const tab = getActiveTab();
+    if (state.settings.rememberFolderView !== false && tab && tab.path && tab.path !== 'PC' && tab.path !== 'TRASH') {
+      state.folderViews[normalizeFolderKey(tab.path)] = state.viewMode;
+      saveFolderViews();
+    }
     saveUiPrefs();
     renderVirtualList();
     if (state.thumbMode === 'viewport' || state.thumbMode === 'all') scheduleThumbBatch();
@@ -3603,6 +4464,7 @@ function bindEvents() {
   };
   $('btn-flt-clear-view').onclick = () => {
     state.filterOnlyMatched = false;
+    for (const set of Object.values(state.colFilters)) set.clear();
     $('btn-flt-clear-view').classList.add('hidden');
     applySortAndFilter();
   };
@@ -3650,12 +4512,14 @@ function bindEvents() {
   $('btn-organize-date').onclick = organizeCurrentFolderByDate;
   $('btn-install-shortcut').onclick = async () => {
     try {
-      await api('/api/fs/action', { method: 'POST', body: JSON.stringify({ action: 'installShortcut' }) });
-      toast('Masaüstü kısayolu ve Windows Sağ Tık menüsü kuruldu!', 'success');
+      await api('/api/system/integration', { method: 'POST', body: JSON.stringify({ action: 'installShortcuts' }) });
+      toast('Masaüstü, Başlat Menüsü (Ctrl+Alt+E) ve Sağ Tık menüsü kuruldu!', 'success');
     } catch (err) {
       toast(err.message, 'error');
     }
   };
+  bindIntegrationAndWelcomeHandlers();
+  bindRelatedHandlers();
   const btnSettings = $('btn-settings');
   if (btnSettings) btnSettings.onclick = openSettingsDialog;
   const btnSetClose = $('btn-settings-close');
@@ -3684,6 +4548,20 @@ function bindEvents() {
     };
   };
   setBind('set-font-size', 'fontSize');
+  setBind('set-default-view', 'defaultViewMode', false, () => {
+    const tab = getActiveTab();
+    if (tab && tab.path && tab.path !== 'PC' && tab.path !== 'TRASH') {
+      applyViewModeForFolder(tab.path);
+      renderVirtualList();
+    }
+  });
+  setBind('set-remember-folder-view', 'rememberFolderView', true, () => {
+    const tab = getActiveTab();
+    if (tab && tab.path && tab.path !== 'PC' && tab.path !== 'TRASH') {
+      applyViewModeForFolder(tab.path);
+      renderVirtualList();
+    }
+  });
   setBind('set-folders-first', 'foldersFirst', true, () => applySortAndFilter());
   setBind('set-show-ext', 'showExtensions', true, () => renderVirtualList());
   setBind('set-compact-sidebar', 'compactSidebar', true);
@@ -3731,6 +4609,24 @@ function bindEvents() {
       renderRecentDashboardSections();
       toast('Son açılan klasör ve dosya geçmişi temizlendi', 'success');
     };
+  }
+  const btnClearFolderViews = $('btn-set-clear-folder-views');
+  if (btnClearFolderViews) {
+    btnClearFolderViews.onclick = () => {
+      state.folderViews = {};
+      saveFolderViews();
+      const tab = getActiveTab();
+      if (tab && tab.path && tab.path !== 'PC' && tab.path !== 'TRASH') {
+        applyViewModeForFolder(tab.path);
+        renderVirtualList();
+      }
+      refreshSettingsCacheStats();
+      toast('Kayıtlı klasör görünümleri temizlendi', 'success');
+    };
+  }
+  const btnResetColWidths = $('btn-set-reset-col-widths');
+  if (btnResetColWidths) {
+    btnResetColWidths.onclick = resetColumnWidths;
   }
   const btnSetShortcut = $('btn-set-update-shortcut');
   if (btnSetShortcut) btnSetShortcut.onclick = () => $('btn-install-shortcut').click();
@@ -3900,6 +4796,7 @@ function bindEvents() {
   // Sanal Liste Etkileşimi & Scroll
   const vp = $('virtual-viewport');
   vp.onscroll = () => {
+    closeColFilterPopover();
     const cur = getActiveTab();
     if (cur && cur.viewType === 'explorer') cur.scrollTop = vp.scrollTop || 0;
     renderVirtualList();
@@ -4018,8 +4915,8 @@ function bindEvents() {
       el.onclick = (ev) => {
         ev.stopPropagation();
         if (entry.disabled) return;
-        hideCustomContextMenu();
-        if (entry.onClick) entry.onClick();
+        if (!entry.keepOpen) hideCustomContextMenu();
+        if (entry.onClick) entry.onClick(ev);
       };
       ctxMenu.appendChild(el);
     }
@@ -4063,6 +4960,8 @@ function bindEvents() {
     return [
       { label: first.isDir ? '📂 Aç' : '🚀 Varsayılan Uygulamada Aç', bold: true, shortcut: 'Enter', onClick: () => (first.isDir ? navigateTo(first.path) : openExternally(first.path)) },
       !first.isDir ? { label: '👁️ Hızlı Önizle', shortcut: 'Space', onClick: () => openQuickLook(first) } : null,
+      !multi && !first.isDir ? { label: '✨ Benzer / Yakın Zamanlı Dosyaları Bul...', onClick: () => openRelatedDialog(first) } : null,
+      !multi && !first.isDir ? { label: '📅 Aynı Gündeki Dosyaları Göster', onClick: () => runRelatedSearch({ item: first, mode: 'sameDay', scope: 'folder', sameCategoryOnly: 'media' }) } : null,
       first.isDir ? { label: '📑 Yeni Sekmede Aç', onClick: () => createTab(first.path, true) } : null,
       first.isDir ? { label: '📊 Bu Klasörü Analiz Et', onClick: () => openAnalyzer(first.path) } : null,
       { sep: true },
@@ -4073,6 +4972,33 @@ function bindEvents() {
       { sep: true },
       { label: '✂️ Kes', shortcut: 'Ctrl+X', onClick: () => setClipboard('cut') },
       { label: '📋 Kopyala', shortcut: 'Ctrl+C', onClick: () => setClipboard('copy') },
+      (state.recentTransferTargets && state.recentTransferTargets.length > 0)
+        ? {
+            label: `⚡ Son Erişilen Yollara Gönder (${state.recentTransferTargets.length})`,
+            shortcut: '▸',
+            keepOpen: true,
+            onClick: (ev) => {
+              const selPaths = sel.map((s) => s.path);
+              const subEntries = [
+                {
+                  label: '← Ana Menüye Dön',
+                  keepOpen: true,
+                  onClick: (ev2) => showCustomContextMenu(ev2, buildExplorerItemMenu(sel)),
+                },
+                { sep: true },
+                ...state.recentTransferTargets.map((rt) => {
+                  const autoOp = resolveDragOp(selPaths, rt.path, false, false);
+                  return {
+                    label: `${autoOp === 'copy' ? '📋 Kopyala' : '📦 Taşı'} → ${rt.name}`,
+                    shortcut: rt.path.length > 26 ? '…' + rt.path.slice(-24) : rt.path,
+                    onClick: () => enqueueTransfer(autoOp, selPaths, rt.path),
+                  };
+                }),
+              ];
+              showCustomContextMenu(ev, subEntries);
+            },
+          }
+        : null,
       state.clipboard.paths.length > 0 && first.isDir && !multi
         ? { label: '📥 Bu Klasöre Yapıştır', onClick: () => enqueueTransfer(state.clipboard.op, state.clipboard.paths, first.path) }
         : null,
@@ -4108,7 +5034,7 @@ function bindEvents() {
       ];
     }
     return [
-      { label: '📥 Yapıştır', shortcut: 'Ctrl+V', disabled: state.clipboard.paths.length === 0, onClick: () => pasteToCurrentFolder() },
+      { label: '📥 Yapıştır', shortcut: 'Ctrl+V', onClick: () => pasteToCurrentFolder() },
       state.basket.size > 0 ? { label: `🧺 Sepettekileri Buraya Taşı (${state.basket.size})`, bold: true, onClick: () => transferBasketTo(tab.path, 'move') } : null,
       state.basket.size > 0 ? { label: `🧺 Sepettekileri Buraya Kopyala (${state.basket.size})`, onClick: () => transferBasketTo(tab.path, 'copy') } : null,
       { label: '📁 Yeni Klasör', shortcut: 'Ctrl+Shift+N', onClick: () => createNewFolder() },
@@ -4140,7 +5066,7 @@ function bindEvents() {
         { label: '📂 Bulunduğu Yeri Aç', onClick: () => revealInExplorer(item.path) },
         { label: '🔗 Yolu Kopyala', onClick: () => { navigator.clipboard.writeText(item.path); toast('Yol kopyalandı'); } },
         { sep: true },
-        { label: inBasket ? '🧺 Sepette (Tekrar Ekle)' : '🧺 Sepete Ekle ve Sonrakine Geç', shortcut: 'B', onClick: () => triageQuickLookBasket() },
+        { label: inBasket ? '🧺 Sepetten Çıkar' : '🧺 Sepete Ekle ve Sonrakine Geç', shortcut: 'B', onClick: () => triageQuickLookBasket() },
         { label: '◀ Önceki', shortcut: '←', disabled: state.qlIndex <= 0, onClick: () => $('btn-ql-prev').click() },
         { label: 'Sonraki ▶', shortcut: '→', disabled: state.qlIndex >= state.qlMediaItems.length - 1, onClick: () => $('btn-ql-next').click() },
         { label: '🔍 Yakınlaştırmayı Sıfırla (%100)', shortcut: '0', disabled: state.qlZoom <= 1.01, onClick: () => setQuickLookZoom(1) },
@@ -4808,9 +5734,10 @@ function renderRecentDashboardSections() {
 function saveUiPrefs() {
   try {
     localStorage.setItem('ld_ui_prefs', JSON.stringify({
-      viewMode: state.viewMode,
+      viewMode: state.globalViewMode || state.viewMode,
       sortBy: state.sortBy,
       sortDir: state.sortDir,
+      recentTargetsOpen: state.recentTargetsOpen !== false,
       dashSections: state.dashSections,
     }));
   } catch {}
@@ -4849,6 +5776,8 @@ function syncSettingsForm() {
     else el.value = String(v ?? '');
   };
   setVal('set-font-size', s.fontSize || 13);
+  setVal('set-default-view', s.defaultViewMode || 'last');
+  setVal('set-remember-folder-view', s.rememberFolderView !== false, true);
   setVal('set-folders-first', s.foldersFirst !== false, true);
   setVal('set-show-ext', s.showExtensions !== false, true);
   setVal('set-compact-sidebar', s.compactSidebar, true);
@@ -4868,11 +5797,12 @@ function syncSettingsForm() {
 function refreshSettingsCacheStats(statsObj = null) {
   const box = $('settings-cache-stats');
   if (!box) return;
+  const savedViewsCount = Object.keys(state.folderViews || {}).length;
   const renderStats = (st) => {
     if (!st) return;
     box.innerHTML = `
       <div><strong>SSD Önbellek:</strong> ${esc(st.cacheRoot || 'AppData\\Local\\LightDesktopCache')}</div>
-      <div><strong>İndeksli Öğe:</strong> ${(st.totalEntries || 0).toLocaleString('tr-TR')} • <strong>Kayıtlı Kapak:</strong> ${(st.cachedThumbCount || 0).toLocaleString('tr-TR')} (${formatBytes(st.cachedThumbBytes || 0)})</div>
+      <div><strong>İndeksli Öğe:</strong> ${(st.totalEntries || 0).toLocaleString('tr-TR')} • <strong>Kayıtlı Kapak:</strong> ${(st.cachedThumbCount || 0).toLocaleString('tr-TR')} (${formatBytes(st.cachedThumbBytes || 0)}) • <strong>Klasör Görünümü:</strong> ${savedViewsCount}</div>
     `;
   };
   if (statsObj) {
@@ -4882,15 +5812,210 @@ function refreshSettingsCacheStats(statsObj = null) {
   api('/api/index/status', { silentErrors: true }).then(renderStats).catch(() => {});
 }
 
+function renderIntegrationStatus(st) {
+  if (!st) return;
+  const banner = $('int-status-banner');
+  const chkDef = $('set-int-default-explorer');
+  const chkAuto = $('set-int-autostart');
+  const btnRestore = $('btn-int-restore-explorer');
+  const btnFixed = $('btn-int-install-fixed');
+
+  if (chkDef) chkDef.checked = Boolean(st.isDefaultExplorer);
+  if (btnRestore) btnRestore.classList.toggle('hidden', !st.isDefaultExplorer);
+  if (chkAuto) chkAuto.checked = Boolean(st.autoStartEnabled);
+  if (btnFixed) {
+    btnFixed.classList.toggle('hidden', !st.isPortable || Boolean(st.isRunningFromFixed) || Boolean(st.hasFixedExe));
+  }
+  if (banner) {
+    const modeText = st.isPortable
+      ? (st.isRunningFromFixed ? 'Sabit Konumlu Portable EXE' : 'Taşınabilir EXE')
+      : 'Geliştirme / Klasör Modu';
+    const trayHintHtml = st.isDefaultExplorer
+      ? `<div class="muted-text" style="margin-top:4px;">💡 İpucu: Klasörlerin anında açılması için alttaki <strong>"Windows Açılışında Arka Planda Hazır Bekle (tray)"</strong> seçeneğini açmanız önerilir.</div>`
+      : '';
+    banner.innerHTML = `
+      <div><strong>Çalışma Modu:</strong> ${esc(modeText)} • <strong>Hedef:</strong> <code>${esc(st.targetPath || '')}</code></div>
+      <div>
+        <strong>Kısayollar:</strong> ${st.hasDesktopShortcut ? '✓ Masaüstü' : '— Masaüstü'} / ${st.hasStartMenuShortcut ? '✓ Başlat (Ctrl+Alt+E)' : '— Başlat'} •
+        <strong>Sağ Tık:</strong> ${st.hasContextMenu ? '✓ Aktif' : '— Kapalı'} •
+        <strong>Varsayılan Gezgin:</strong> ${st.isDefaultExplorer ? '✓ LightDesktop' : 'Windows Gezgini'}
+      </div>
+      ${trayHintHtml}
+    `;
+  }
+}
+
+async function refreshIntegrationStatus() {
+  try {
+    const st = await api('/api/system/integration', { silentErrors: true });
+    renderIntegrationStatus(st);
+    return st;
+  } catch {
+    return null;
+  }
+}
+
+function bindIntegrationAndWelcomeHandlers() {
+  const chkDef = $('set-int-default-explorer');
+  const btnRestore = $('btn-int-restore-explorer');
+  const chkAuto = $('set-int-autostart');
+  const btnShortcuts = $('btn-int-shortcuts');
+  const btnFixed = $('btn-int-install-fixed');
+  const btnWelcome = $('btn-int-open-welcome');
+
+  if (chkDef) {
+    chkDef.onchange = async () => {
+      try {
+        const res = await api('/api/system/integration', {
+          method: 'POST',
+          body: JSON.stringify({ action: 'setDefaultExplorer', enabled: chkDef.checked }),
+        });
+        renderIntegrationStatus(res.status);
+        toast(chkDef.checked ? 'LightDesktop varsayılan klasör gezgini yapıldı!' : 'Windows Gezgini varsayılana döndürüldü.', 'success');
+      } catch (err) {
+        chkDef.checked = !chkDef.checked;
+        toast(err.message, 'error');
+      }
+    };
+  }
+  if (btnRestore) {
+    btnRestore.onclick = async () => {
+      try {
+        const res = await api('/api/system/integration', {
+          method: 'POST',
+          body: JSON.stringify({ action: 'setDefaultExplorer', enabled: false }),
+        });
+        renderIntegrationStatus(res.status);
+        toast('Windows Gezgini varsayılana geri döndürüldü.', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+  }
+  if (chkAuto) {
+    chkAuto.onchange = async () => {
+      try {
+        const res = await api('/api/system/integration', {
+          method: 'POST',
+          body: JSON.stringify({ action: 'setAutoStart', enabled: chkAuto.checked }),
+        });
+        renderIntegrationStatus(res.status);
+        toast(chkAuto.checked ? 'Windows açılışında arka planda hazır bekleyecek.' : 'Otomatik başlatma kapatıldı.', 'success');
+      } catch (err) {
+        chkAuto.checked = !chkAuto.checked;
+        toast(err.message, 'error');
+      }
+    };
+  }
+  if (btnShortcuts) {
+    btnShortcuts.onclick = async () => {
+      try {
+        const res = await api('/api/system/integration', {
+          method: 'POST',
+          body: JSON.stringify({ action: 'installShortcuts' }),
+        });
+        renderIntegrationStatus(res.status);
+        toast('Masaüstü, Başlat Menüsü (Ctrl+Alt+E) ve Sağ Tık menüsü kuruldu!', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+  }
+  if (btnFixed) {
+    btnFixed.onclick = async () => {
+      try {
+        const res = await api('/api/system/integration', {
+          method: 'POST',
+          body: JSON.stringify({ action: 'installFixedApp' }),
+        });
+        renderIntegrationStatus(res.status);
+        toast('Uygulama sabit konuma kuruldu (%LOCALAPPDATA%\\LightDesktop)!', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+  }
+  if (btnWelcome) {
+    btnWelcome.onclick = () => {
+      const sd = $('settings-dialog');
+      if (sd && sd.open) sd.close();
+      openWelcomeSetupDialog(true);
+    };
+  }
+
+  const wDlg = $('welcome-setup-dialog');
+  const markDone = () => {
+    try { localStorage.setItem('ld_welcome_done', '1'); } catch {}
+  };
+  if ($('btn-wel-close')) {
+    $('btn-wel-close').onclick = () => { markDone(); wDlg.close(); };
+  }
+  if ($('btn-wel-skip')) {
+    $('btn-wel-skip').onclick = () => { markDone(); wDlg.close(); };
+  }
+  if (wDlg) {
+    wDlg.addEventListener('cancel', markDone);
+  }
+  if ($('btn-wel-apply')) {
+    $('btn-wel-apply').onclick = async () => {
+      const btn = $('btn-wel-apply');
+      btn.disabled = true;
+      try {
+        const res = await api('/api/system/integration', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'applyBundle',
+            installFixed: Boolean($('wel-fixed')?.checked && !$('wel-fixed-row')?.classList.contains('hidden')),
+            shortcuts: Boolean($('wel-shortcuts')?.checked),
+            contextMenu: Boolean($('wel-shortcuts')?.checked),
+            defaultExplorer: Boolean($('wel-default-explorer')?.checked),
+            autoStart: Boolean($('wel-autostart')?.checked),
+          }),
+        });
+        markDone();
+        renderIntegrationStatus(res.status);
+        wDlg.close();
+        toast('Hızlı kurulum uygulandı! Artık Ctrl+Alt+E veya Başlat Menüsü ile açabilirsiniz.', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+}
+
+async function openWelcomeSetupDialog(forceOpen = false) {
+  const dlg = $('welcome-setup-dialog');
+  if (!dlg) return;
+  try {
+    if (!forceOpen && localStorage.getItem('ld_welcome_done') === '1') return;
+  } catch {}
+  const st = await refreshIntegrationStatus();
+  if (st) {
+    const fixedRow = $('wel-fixed-row');
+    if (fixedRow) {
+      fixedRow.classList.toggle('hidden', !st.isPortable || Boolean(st.isRunningFromFixed) || Boolean(st.hasFixedExe));
+    }
+    if ($('wel-default-explorer')) $('wel-default-explorer').checked = Boolean(st.isDefaultExplorer);
+    if ($('wel-autostart')) $('wel-autostart').checked = Boolean(st.autoStartEnabled);
+  }
+  if (!dlg.open) dlg.showModal();
+}
+
 function openSettingsDialog() {
   syncSettingsForm();
   refreshSettingsCacheStats();
+  refreshIntegrationStatus();
   const dlg = $('settings-dialog');
   if (dlg && !dlg.open) dlg.showModal();
 }
 
 function loadUiPrefs() {
   loadDashHistory();
+  loadRecentTransferTargets();
+  loadFolderViews();
+  loadColumnWidths();
   try {
     const rawSet = JSON.parse(localStorage.getItem('ld_app_settings') || 'null');
     if (rawSet && typeof rawSet === 'object') {
@@ -4910,10 +6035,12 @@ function loadUiPrefs() {
     const raw = localStorage.getItem('ld_ui_prefs');
     if (!raw) {
       applyDashSectionVisibility();
+      updateListHeaderIndicators();
       return;
     }
     const p = JSON.parse(raw);
     if (p.viewMode && $('view-mode').querySelector(`option[value="${p.viewMode}"]`)) {
+      state.globalViewMode = p.viewMode;
       state.viewMode = p.viewMode;
       $('view-mode').value = p.viewMode;
     }
@@ -4925,6 +6052,9 @@ function loadUiPrefs() {
       state.sortDir = p.sortDir;
       $('btn-sort-dir').textContent = p.sortDir === 'asc' ? '▲' : '▼';
     }
+    if (typeof p.recentTargetsOpen === 'boolean') {
+      state.recentTargetsOpen = p.recentTargetsOpen;
+    }
     if (p.dashSections && typeof p.dashSections === 'object') {
       state.dashSections = {
         quick: p.dashSections.quick !== false,
@@ -4934,6 +6064,7 @@ function loadUiPrefs() {
     }
   } catch {}
   applyDashSectionVisibility();
+  updateListHeaderIndicators();
 }
 
 async function activateItem(item) {
@@ -4956,6 +6087,12 @@ async function activateItem(item) {
 }
 
 // ---------- Windows 11 Mavi Seçim Kutusu (Marquee Selection) ----------
+function isDragFileHandle(target, rowEl) {
+  if (!rowEl) return false;
+  if (rowEl.classList.contains('selected')) return true;
+  return Boolean(target.closest('.fr-icon, .fr-thumb, .fr-text, .tile-thumb-box, .tile-name, .grid-preview img, .grid-preview span, .grid-name, .compact-cell span'));
+}
+
 function setupMarqueeSelection() {
   const vp = $('virtual-viewport');
   const box = $('marquee-box');
@@ -4967,12 +6104,6 @@ function setupMarqueeSelection() {
   let lastClientY = 0;
   let baseSelection = new Set();
   let autoScrollTimer = null;
-
-  const isDragFileHandle = (target, rowEl) => {
-    if (!rowEl) return false;
-    if (rowEl.classList.contains('selected')) return true;
-    return Boolean(target.closest('.fr-icon, .fr-thumb, .fr-text, .tile-thumb-box, .tile-name, .grid-preview img, .grid-preview span, .grid-name, .compact-cell span'));
-  };
 
   const updateMarqueeSelection = () => {
     const vpRect = vp.getBoundingClientRect();
@@ -5133,49 +6264,387 @@ function setupDragAndDrop() {
     return true;
   };
 
-  const handleDropToDir = async (e, targetDir) => {
-    e.preventDefault();
+  const executeDropPaths = async (paths, targetDir, isCopy) => {
     setDropHighlight(null);
     clearHoverExpand();
-    const isCopy = e.ctrlKey;
-    if (!canDropInto(targetDir, isCopy)) return;
+    if (!paths || paths.length === 0 || !targetDir) return;
     const nt = normDir(targetDir);
-    const paths = isCopy
-      ? state.draggedPaths.slice()
-      : state.draggedPaths.filter((src) => normDir(getParentDir(src)) !== nt);
-    if (paths.length === 0) return;
+    const filtered = isCopy ? paths.slice() : paths.filter((src) => normDir(getParentDir(src)) !== nt);
+    if (filtered.length === 0) return;
 
-    // Taşınan bir klasörün veya hedefin alt ağaç önbelleğini sıfırla
     document.querySelectorAll('.sidebar .tree-node[data-loaded="1"]').forEach((node) => {
       const rowPath = node.querySelector(':scope > .tree-row')?.dataset.path;
       if (rowPath && normDir(rowPath) === nt) {
         node.dataset.loaded = '0';
       }
     });
-    await enqueueTransfer(isCopy ? 'copy' : 'move', paths, targetDir);
+    await enqueueTransfer(isCopy ? 'copy' : 'move', filtered, targetDir);
   };
 
+  const isExternalFilesDrag = (e) => {
+    if (state.draggedPaths.length > 0 || !e || !e.dataTransfer) return false;
+    const types = e.dataTransfer.types;
+    if (!types) return false;
+    return Array.from(types).includes('Files');
+  };
+
+  const canDropExternalInto = (targetDir) => Boolean(targetDir && targetDir !== 'PC' && targetDir !== 'TRASH');
+
+  const handleExternalDrop = async (e, targetDir, targetKind = 'dir') => {
+    e.preventDefault();
+    setDropHighlight(null);
+    clearHoverExpand();
+    if (targetKind === 'dir' && !canDropExternalInto(targetDir)) return;
+    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+    if (files.length === 0) return;
+
+    if (window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessageWithAdditionalObjects === 'function') {
+      window.chrome.webview.postMessageWithAdditionalObjects(
+        {
+          type: 'resolveExternalDrop',
+          targetDir: targetDir || '',
+          targetKind,
+          ctrlKey: Boolean(e.ctrlKey),
+          shiftKey: Boolean(e.shiftKey),
+        },
+        files
+      );
+      return;
+    }
+
+    if (targetKind !== 'dir') {
+      toast('Tarayıcı modunda dışarıdan doğrudan sepete bırakma desteklenmiyor.', 'info');
+      return;
+    }
+    toast(`Dışarıdan ${files.length} dosya aktarılıyor...`, 'info');
+    let okCount = 0;
+    for (const f of files) {
+      if (!f || f.size === 0 && !f.type) {
+        // Tarayıcı modunda boş klasör yüklemesi kısıtlıdır; normal dosyaları aktar
+      }
+      try {
+        const upRes = await fetch(`/api/fs/upload-external?destDir=${encodeURIComponent(targetDir)}&name=${encodeURIComponent(f.name)}`, {
+          method: 'POST',
+          body: f,
+        });
+        if (upRes.ok) okCount++;
+      } catch {}
+    }
+    if (okCount > 0) {
+      recordRecentTransferTarget(targetDir);
+      toast(`${okCount} dosya hedef klasöre kopyalandı`, 'success');
+      const tab = getActiveTab();
+      if (tab && tab.path && normDir(tab.path) === normDir(targetDir)) {
+        navigateTo(tab.path, { pushHistory: false, forceRefresh: true, preserveScroll: true });
+      }
+      if (state.dualOpen && state.dualPath && normDir(state.dualPath) === normDir(targetDir)) {
+        navigateDual(state.dualPath, false);
+      }
+    } else {
+      toast('Dışarıdan klasör aktarımı için LightDesktop.exe kullanın veya Ctrl+V ile yapıştırın.', 'info');
+    }
+  };
+
+  const handleDropToDir = async (e, targetDir) => {
+    if (isExternalFilesDrag(e)) {
+      await handleExternalDrop(e, targetDir, 'dir');
+      return;
+    }
+    e.preventDefault();
+    setDropHighlight(null);
+    clearHoverExpand();
+    const op = resolveDragOp(state.draggedPaths, targetDir, e.ctrlKey, e.shiftKey);
+    const isCopy = op === 'copy';
+    if (!canDropInto(targetDir, isCopy)) return;
+    await executeDropPaths(state.draggedPaths, targetDir, isCopy);
+  };
+
+  const isNativeWebView = Boolean(window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessage === 'function');
   const vp = $('virtual-viewport');
-  vp.addEventListener('dragstart', (e) => {
-    const rowEl = e.target.closest('[data-index]');
-    if (!rowEl) return;
-    const item = state.viewItems[Number(rowEl.dataset.index)];
-    if (!item) return;
+  const dualList = $('dual-list');
 
-    if (!state.selectedPaths.has(item.path)) {
-      state.selectedPaths.clear();
-      state.selectedPaths.add(item.path);
-      state.lastClickedIndex = Number(rowEl.dataset.index);
-      updateSelectionDomInPlace();
-      updateStatusCounts();
-      updateToolbarButtons();
+  if (isNativeWebView) {
+    // WebView2 yerel modunda sürüklemeyi kesintisiz kontrol edip pencere dışına çıkınca gerçek Windows CF_HDROP sürüklemesi başlat
+    const suppressNativeDrag = (e) => e.preventDefault();
+    vp.addEventListener('dragstart', suppressNativeDrag);
+    if (dualList) dualList.addEventListener('dragstart', suppressNativeDrag);
+
+    let ghostEl = null;
+    let pState = null;
+
+    const removeGhost = () => {
+      if (ghostEl) {
+        ghostEl.remove();
+        ghostEl = null;
+      }
+    };
+
+    const cleanupPointerDrag = () => {
+      if (pState && pState.captureEl && pState.pointerId !== null) {
+        try { pState.captureEl.releasePointerCapture(pState.pointerId); } catch {}
+      }
+      pState = null;
+      removeGhost();
+      setDropHighlight(null);
+      clearHoverExpand();
+    };
+
+    const findInAppDropTarget = (clientX, clientY, ctrlKey, shiftKey) => {
+      const el = document.elementFromPoint(clientX, clientY);
+      if (!el) return null;
+      const treeRow = el.closest('.sidebar .tree-row[data-path]');
+      if (treeRow) {
+        const op = resolveDragOp(state.draggedPaths, treeRow.dataset.path, ctrlKey, shiftKey);
+        if (canDropInto(treeRow.dataset.path, op === 'copy')) {
+          return { kind: 'dir', dir: treeRow.dataset.path, op, highlightEl: treeRow, treeNode: treeRow.closest('.tree-node') };
+        }
+      }
+      const listRow = el.closest('#virtual-viewport [data-index]');
+      if (listRow) {
+        const it = state.viewItems[Number(listRow.dataset.index)];
+        if (it && it.isDir) {
+          const op = resolveDragOp(state.draggedPaths, it.path, ctrlKey, shiftKey);
+          if (canDropInto(it.path, op === 'copy')) {
+            return { kind: 'dir', dir: it.path, op, highlightEl: listRow };
+          }
+        }
+      }
+      const crumb = el.closest('#breadcrumbs .crumb-btn[data-path]');
+      if (crumb) {
+        const op = resolveDragOp(state.draggedPaths, crumb.dataset.path, ctrlKey, shiftKey);
+        if (canDropInto(crumb.dataset.path, op === 'copy')) {
+          return { kind: 'dir', dir: crumb.dataset.path, op, highlightEl: crumb };
+        }
+      }
+      const basketEl = el.closest('#btn-basket, #basket-drawer');
+      if (basketEl) {
+        return { kind: 'basket', op: 'copy', highlightEl: basketEl };
+      }
+      const dList = el.closest('#dual-list');
+      if (dList && state.dualPath) {
+        const dRow = el.closest('.dual-row[data-isdir="1"]');
+        const tDir = dRow ? dRow.dataset.path : state.dualPath;
+        const op = resolveDragOp(state.draggedPaths, tDir, ctrlKey, shiftKey);
+        if (canDropInto(tDir, op === 'copy')) {
+          return { kind: 'dir', dir: tDir, op, highlightEl: dRow || dList };
+        }
+      }
+      if (vp.contains(el) && state.dragSource === 'dual') {
+        const tab = getActiveTab();
+        if (tab && tab.path !== 'PC') {
+          const op = resolveDragOp(state.draggedPaths, tab.path, ctrlKey, shiftKey);
+          if (canDropInto(tab.path, op === 'copy')) {
+            return { kind: 'dir', dir: tab.path, op, highlightEl: null };
+          }
+        }
+      }
+      return null;
+    };
+
+    const beginPointerDrag = (e, itemPaths, sourceKind) => {
+      if (e.button !== 0 || e.altKey) return;
+      pState = {
+        startX: e.clientX,
+        startY: e.clientY,
+        pointerId: e.pointerId,
+        captureEl: e.currentTarget,
+        paths: itemPaths,
+        sourceKind,
+        active: false,
+        handedOff: false,
+      };
+    };
+
+    vp.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.altKey) return;
+      if (e.target.closest('button, input, a, .eye-btn, .lh-resizer')) return;
+      const rowEl = e.target.closest('[data-index]');
+      if (!rowEl || !isDragFileHandle(e.target, rowEl)) return;
+      const item = state.viewItems[Number(rowEl.dataset.index)];
+      if (!item || item.inTrash) return;
+      const paths = state.selectedPaths.has(item.path) ? Array.from(state.selectedPaths) : [item.path];
+      beginPointerDrag(e, paths, 'vp');
+    });
+
+    if (dualList) {
+      dualList.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || e.altKey) return;
+        const row = e.target.closest('.dual-row[data-path]');
+        if (!row) return;
+        beginPointerDrag(e, [row.dataset.path], 'dual');
+      });
     }
 
-    state.draggedPaths = Array.from(state.selectedPaths);
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'copyMove';
-      e.dataTransfer.setData('text/plain', state.draggedPaths.join('\n'));
-    }
+    window.addEventListener('pointermove', (e) => {
+      if (!pState || pState.handedOff) return;
+      if ((e.buttons & 1) !== 1) {
+        if (pState.active) {
+          state.draggedPaths = [];
+          cleanupPointerDrag();
+        } else {
+          pState = null;
+        }
+        return;
+      }
+
+      if (!pState.active) {
+        if (Math.hypot(e.clientX - pState.startX, e.clientY - pState.startY) < 6) return;
+        pState.active = true;
+        state.dragSource = pState.sourceKind;
+        state.draggedPaths = pState.paths.slice();
+        if (pState.sourceKind === 'vp' && state.draggedPaths.length === 1 && !state.selectedPaths.has(state.draggedPaths[0])) {
+          state.selectedPaths.clear();
+          state.selectedPaths.add(state.draggedPaths[0]);
+          updateSelectionDomInPlace();
+          updateStatusCounts();
+          updateToolbarButtons();
+        }
+        try { pState.captureEl.setPointerCapture(pState.pointerId); } catch {}
+        ghostEl = document.createElement('div');
+        ghostEl.className = 'drag-ghost-pill';
+        document.body.appendChild(ghostEl);
+      }
+
+      const outsideWindow = e.clientX <= 1 || e.clientY <= 1 || e.clientX >= window.innerWidth - 1 || e.clientY >= window.innerHeight - 1;
+      if (outsideWindow) {
+        pState.handedOff = true;
+        const dragPaths = state.draggedPaths.slice();
+        cleanupPointerDrag();
+        state.suppressNextClick = true;
+        setTimeout(() => { state.suppressNextClick = false; }, 120);
+        window.chrome.webview.postMessage({ type: 'startNativeFileDrag', paths: dragPaths });
+        return;
+      }
+
+      const hit = findInAppDropTarget(e.clientX, e.clientY, e.ctrlKey, e.shiftKey);
+      if (ghostEl) {
+        const isCopyOp = hit ? (hit.op === 'copy') : e.ctrlKey;
+        const prefix = isCopyOp ? '📋 Kopyala: ' : '📦 Taşı: ';
+        const label = state.draggedPaths.length === 1
+          ? getFolderTitle(state.draggedPaths[0])
+          : `${state.draggedPaths.length} öğe`;
+        ghostEl.textContent = prefix + label;
+        ghostEl.style.left = `${e.clientX + 14}px`;
+        ghostEl.style.top = `${e.clientY + 14}px`;
+      }
+
+      setDropHighlight(hit ? hit.highlightEl : null);
+      if (hit && hit.treeNode) {
+        const twisty = hit.treeNode.querySelector('.tree-twisty');
+        const tPath = hit.dir;
+        if (twisty && !twisty.classList.contains('expanded') && !twisty.classList.contains('empty')) {
+          if (hoverExpandPath !== tPath) {
+            clearHoverExpand();
+            hoverExpandPath = tPath;
+            hoverExpandTimer = setTimeout(() => {
+              setTreeNodeExpanded(hit.treeNode, tPath, Number(hit.treeNode.dataset.depth || 0), true);
+            }, 550);
+          }
+        } else if (hoverExpandPath !== tPath) {
+          clearHoverExpand();
+        }
+      } else {
+        clearHoverExpand();
+      }
+    });
+
+    window.addEventListener('pointerup', (e) => {
+      if (!pState) return;
+      if (!pState.active) {
+        pState = null;
+        return;
+      }
+      if (pState.handedOff) {
+        pState = null;
+        return;
+      }
+      const dragPaths = state.draggedPaths.slice();
+      const hit = findInAppDropTarget(e.clientX, e.clientY, e.ctrlKey, e.shiftKey);
+      cleanupPointerDrag();
+      state.draggedPaths = [];
+      state.dragSource = null;
+      state.suppressNextClick = true;
+      setTimeout(() => { state.suppressNextClick = false; }, 120);
+
+      if (hit && hit.kind === 'basket') {
+        const draggedSet = new Set(dragPaths);
+        const matched = state.viewItems.filter((it) => draggedSet.has(it.path));
+        if (matched.length > 0) addItemsToBasket(matched);
+      } else if (hit && hit.kind === 'dir') {
+        executeDropPaths(dragPaths, hit.dir, hit.op === 'copy');
+      }
+    });
+
+    window.chrome.webview.addEventListener('message', (ev) => {
+      const msg = ev && ev.data;
+      if (!msg) return;
+      if (msg.type === 'externalDropResolved') {
+        const paths = Array.isArray(msg.paths) ? msg.paths.filter(Boolean) : [];
+        if (paths.length === 0) return;
+        if (msg.targetKind === 'basket') {
+          let added = 0;
+          for (const p of paths) {
+            if (!state.basket.has(p)) {
+              state.basket.set(p, { path: p, name: getFolderTitle(p), isDir: false });
+              added++;
+            }
+          }
+          renderBasket();
+          toast(added > 0 ? `${added} öğe sepete eklendi` : 'Öğeler zaten sepette');
+        } else if (canDropExternalInto(msg.targetDir)) {
+          const op = resolveDragOp(paths, msg.targetDir, Boolean(msg.ctrlKey), Boolean(msg.shiftKey));
+          executeDropPaths(paths, msg.targetDir, op === 'copy');
+        }
+        return;
+      }
+      if (msg.type !== 'nativeDragDone') return;
+      state.draggedPaths = [];
+      state.dragSource = null;
+      if (msg.effect === 'Move' && Array.isArray(msg.paths)) {
+        let dirtyBasket = false;
+        for (const p of msg.paths) {
+          if (state.basket.delete(p)) dirtyBasket = true;
+        }
+        if (dirtyBasket) renderBasket();
+        const tab = getActiveTab();
+        if (tab && tab.path && tab.path !== 'PC' && tab.path !== 'TRASH') {
+          navigateTo(tab.path, { pushHistory: false, forceRefresh: true, preserveScroll: true });
+        }
+      }
+    });
+  } else {
+    vp.addEventListener('dragstart', (e) => {
+      const rowEl = e.target.closest('[data-index]');
+      if (!rowEl) return;
+      const item = state.viewItems[Number(rowEl.dataset.index)];
+      if (!item) return;
+
+      if (!state.selectedPaths.has(item.path)) {
+        state.selectedPaths.clear();
+        state.selectedPaths.add(item.path);
+        state.lastClickedIndex = Number(rowEl.dataset.index);
+        updateSelectionDomInPlace();
+        updateStatusCounts();
+        updateToolbarButtons();
+      }
+
+      state.draggedPaths = Array.from(state.selectedPaths);
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'copyMove';
+        e.dataTransfer.setData('text/plain', state.draggedPaths.join('\n'));
+        if (state.draggedPaths.length === 1 && !item.isDir) {
+          const dlUrl = `${window.location.origin}/api/media?path=${encodeURIComponent(item.path)}`;
+          try { e.dataTransfer.setData('DownloadURL', `application/octet-stream:${item.name}:${dlUrl}`); } catch {}
+        }
+      }
+    });
+  }
+
+  document.addEventListener('dragover', (e) => {
+    if (isExternalFilesDrag(e)) e.preventDefault();
+  });
+  document.addEventListener('drop', (e) => {
+    if (isExternalFilesDrag(e) && !e.defaultPrevented) e.preventDefault();
   });
 
   document.addEventListener('dragend', () => {
@@ -5188,13 +6657,16 @@ function setupDragAndDrop() {
   const sidebar = document.querySelector('.sidebar');
   sidebar.addEventListener('dragover', (e) => {
     const row = e.target.closest('.tree-row[data-path]');
-    if (!row || !canDropInto(row.dataset.path, e.ctrlKey)) {
+    const extDrag = isExternalFilesDrag(e);
+    const op = row ? (extDrag ? (e.shiftKey ? 'move' : 'copy') : resolveDragOp(state.draggedPaths, row.dataset.path, e.ctrlKey, e.shiftKey)) : 'move';
+    const valid = row && (extDrag ? canDropExternalInto(row.dataset.path) : canDropInto(row.dataset.path, op === 'copy'));
+    if (!valid) {
       if (currentDropEl && sidebar.contains(currentDropEl)) setDropHighlight(null);
       clearHoverExpand();
       return;
     }
     e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = op;
     setDropHighlight(row);
 
     const node = row.closest('.tree-node');
@@ -5227,12 +6699,15 @@ function setupDragAndDrop() {
   vp.addEventListener('dragover', (e) => {
     const rowEl = e.target.closest('[data-index]');
     const item = rowEl ? state.viewItems[Number(rowEl.dataset.index)] : null;
-    if (!item || !item.isDir || !canDropInto(item.path, e.ctrlKey)) {
+    const extDrag = isExternalFilesDrag(e);
+    const op = item && item.isDir ? (extDrag ? (e.shiftKey ? 'move' : 'copy') : resolveDragOp(state.draggedPaths, item.path, e.ctrlKey, e.shiftKey)) : 'move';
+    const valid = item && item.isDir && (extDrag ? canDropExternalInto(item.path) : canDropInto(item.path, op === 'copy'));
+    if (!valid) {
       if (currentDropEl && vp.contains(currentDropEl)) setDropHighlight(null);
       return;
     }
     e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = op;
     setDropHighlight(rowEl);
   });
   vp.addEventListener('dragleave', (e) => {
@@ -5248,12 +6723,15 @@ function setupDragAndDrop() {
   const bc = $('breadcrumbs');
   bc.addEventListener('dragover', (e) => {
     const btn = e.target.closest('.crumb-btn[data-path]');
-    if (!btn || !canDropInto(btn.dataset.path, e.ctrlKey)) {
+    const extDrag = isExternalFilesDrag(e);
+    const op = btn ? (extDrag ? (e.shiftKey ? 'move' : 'copy') : resolveDragOp(state.draggedPaths, btn.dataset.path, e.ctrlKey, e.shiftKey)) : 'move';
+    const valid = btn && (extDrag ? canDropExternalInto(btn.dataset.path) : canDropInto(btn.dataset.path, op === 'copy'));
+    if (!valid) {
       if (currentDropEl && bc.contains(currentDropEl)) setDropHighlight(null);
       return;
     }
     e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = op;
     setDropHighlight(btn);
   });
   bc.addEventListener('dragleave', (e) => {
@@ -5267,7 +6745,7 @@ function setupDragAndDrop() {
   // 4) Sepet Butonu & Sepet Çekmecesi
   for (const targetEl of [$('btn-basket'), $('basket-drawer')]) {
     targetEl.addEventListener('dragover', (e) => {
-      if (!state.draggedPaths.length) return;
+      if (!state.draggedPaths.length && !isExternalFilesDrag(e)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       setDropHighlight(targetEl);
@@ -5276,6 +6754,10 @@ function setupDragAndDrop() {
       if (!targetEl.contains(e.relatedTarget)) setDropHighlight(null);
     });
     targetEl.addEventListener('drop', (e) => {
+      if (isExternalFilesDrag(e)) {
+        handleExternalDrop(e, '', 'basket');
+        return;
+      }
       e.preventDefault();
       setDropHighlight(null);
       if (!state.draggedPaths.length) return;
@@ -5286,26 +6768,30 @@ function setupDragAndDrop() {
   }
 
   // 5) Çift Panel (Dual Pane) Sürükle-Bırak
-  const dualList = $('dual-list');
-  dualList.addEventListener('dragstart', (e) => {
-    const row = e.target.closest('.dual-row');
-    if (!row) return;
-    state.draggedPaths = [row.dataset.path];
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'copyMove';
-      e.dataTransfer.setData('text/plain', row.dataset.path);
-    }
-  });
+  if (dualList && !isNativeWebView) {
+    dualList.addEventListener('dragstart', (e) => {
+      const row = e.target.closest('.dual-row');
+      if (!row) return;
+      state.draggedPaths = [row.dataset.path];
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'copyMove';
+        e.dataTransfer.setData('text/plain', row.dataset.path);
+      }
+    });
+  }
   dualList.addEventListener('dragover', (e) => {
-    if (!state.draggedPaths.length || !state.dualPath) return;
+    const extDrag = isExternalFilesDrag(e);
+    if ((!state.draggedPaths.length && !extDrag) || !state.dualPath) return;
     const row = e.target.closest('.dual-row[data-isdir="1"]');
     const targetDir = row ? row.dataset.path : state.dualPath;
-    if (!canDropInto(targetDir, e.ctrlKey)) {
+    const op = extDrag ? (e.shiftKey ? 'move' : 'copy') : resolveDragOp(state.draggedPaths, targetDir, e.ctrlKey, e.shiftKey);
+    const valid = extDrag ? canDropExternalInto(targetDir) : canDropInto(targetDir, op === 'copy');
+    if (!valid) {
       if (currentDropEl && dualList.contains(currentDropEl)) setDropHighlight(null);
       return;
     }
     e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = op;
     setDropHighlight(row || dualList);
   });
   dualList.addEventListener('dragleave', (e) => {
@@ -5317,22 +6803,26 @@ function setupDragAndDrop() {
     if (targetDir) handleDropToDir(e, targetDir);
   });
 
-  // Soldaki boş alana sağ panelden sürükleyip bırakma
+  // Soldaki boş alana (sağ panelden veya dış uygulamadan / masaüstünden) sürükleyip bırakma
   vp.addEventListener('dragover', (e) => {
     const rowEl = e.target.closest('[data-index]');
     const item = rowEl ? state.viewItems[Number(rowEl.dataset.index)] : null;
     if (item && item.isDir) return;
     const tab = getActiveTab();
-    if (!tab || tab.path === 'PC' || !canDropInto(tab.path, e.ctrlKey)) return;
+    if (!tab || tab.path === 'PC' || tab.path === 'TRASH') return;
+    const extDrag = isExternalFilesDrag(e);
+    const op = extDrag ? (e.shiftKey ? 'move' : 'copy') : resolveDragOp(state.draggedPaths, tab.path, e.ctrlKey, e.shiftKey);
+    const valid = extDrag ? canDropExternalInto(tab.path) : canDropInto(tab.path, op === 'copy');
+    if (!valid) return;
     e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = op;
   });
   vp.addEventListener('drop', (e) => {
     const rowEl = e.target.closest('[data-index]');
     const item = rowEl ? state.viewItems[Number(rowEl.dataset.index)] : null;
     if (item && item.isDir) return;
     const tab = getActiveTab();
-    if (tab && tab.path !== 'PC') handleDropToDir(e, tab.path);
+    if (tab && tab.path !== 'PC' && tab.path !== 'TRASH') handleDropToDir(e, tab.path);
   });
 }
 
@@ -5374,17 +6864,43 @@ async function hydrateInitData(openInitialTab = false) {
   }
 }
 
+function setupViewportResizeObserver() {
+  const vp = $('virtual-viewport');
+  if (!vp) return;
+  let lastW = vp.clientWidth;
+  let raf = 0;
+  const onChange = () => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const ev = $('explorer-view');
+      if (!ev || ev.classList.contains('hidden')) return;
+      const w = vp.clientWidth;
+      if (w <= 0 || Math.abs(w - lastW) < 2) return;
+      lastW = w;
+      try { renderVirtualList(); } catch (e) { console.warn(e); }
+    });
+  };
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(onChange).observe(vp);
+  window.addEventListener('resize', onChange);
+}
+
 async function init() {
   try { loadUiPrefs(); } catch {}
   try { bindEvents(); } catch {}
   try { setupMarqueeSelection(); } catch {}
   try { setupDragAndDrop(); } catch {}
+  try { setupViewportResizeObserver(); } catch {}
   await restoreWindowBounds();
   try { setupWindowBoundsPersistence(); } catch {}
 
   const ok = await hydrateInitData(true);
   pollIndexStatus();
   pollTransferStatus();
+
+  if (ok) {
+    setTimeout(() => { openWelcomeSetupDialog(false); }, 450);
+  }
 
   if (!ok) {
     const retryTimer = setInterval(async () => {

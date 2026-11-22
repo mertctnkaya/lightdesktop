@@ -13,28 +13,25 @@ Klasik Windows Dosya Gezgini, binlerce fotoğraf veya videonun bulunduğu büyü
 Hiçbir ek program yüklemeden doğrudan kullanmak için:
 
 1. Sağ taraftaki **Releases (Sürümler)** bölümünden en güncel **`LightDesktop.exe`** dosyasını indirin.
-2. İstediğiniz bir klasöre veya doğrudan Masaüstü'ne taşıyın ve çift tıklayıp çalıştırın.
+2. Çift tıklayıp çalıştırın.
    - _Not: İlk açılışta uygulama yaklaşık 1 saniye boyunca kendi çalışma dosyalarını hazırlar; sonraki tüm açılışlarda anında açılır._
-3. Uygulama açıldıktan sonra sağ üstteki **📌 Kısayol Kur** butonuna tıklayarak:
-   - Masaüstünüze hazır ikonlu **LightDesktop** kısayolu ekleyebilir,
-   - Windows'ta herhangi bir klasöre sağ tıkladığınızda **"LightDesktop ile Aç"** seçeneğinin görünmesini sağlayabilirsiniz.
+3. İlk açılışta gelen **Hızlı Kurulum Sihirbazı** (veya **⚙️ Ayarlar → Windows Entegrasyonu**) üzerinden tek tıkla:
+   - Uygulamayı sabit bir konuma kurabilir (indirdiğiniz dosyayı silseniz bile çalışmaya devam eder),
+   - Masaüstü ve **Başlat Menüsü** kısayoluyla birlikte her klasörde **"LightDesktop ile Aç"** sağ tık menüsü ve **`Ctrl + Alt + E`** hızlı açma kısayolu oluşturabilir,
+   - Dilerseniz klasörleri doğrudan **LightDesktop ile açılacak şekilde** varsayılan dosya gezgini yapabilirsiniz (tek tıkla istediğiniz an Windows Gezgini'ne geri dönebilirsiniz).
 
 > **Sistem Gereksinimleri:** Windows 10 veya Windows 11 (64-bit). Bilgisayarınızda Edge tarayıcısı kaldırılmış olsa bile çalışır; gerekirse sisteminizdeki Chrome/Brave veya varsayılan tarayıcı üzerinden otomatik olarak açılır.
 
-### Seçenek 2: Kaynak Koddan Çalıştırma (Geliştiriciler İçin)
+### Seçenek 2: Kaynak Koddan Çalıştırma ve Derleme (Geliştiriciler İçin)
 
 1. Bilgisayarınızda **Node.js (v22 veya üzeri)** kurulu olmalıdır.
-2. Bu depoyu indirin veya klonlayın:
+2. Bu depoyu indirin veya klonlayın (`src/` içinde kaynak kodlar, `scripts/` içinde çalıştırma/derleme betikleri bulunur):
    ```bat
    git clone https://github.com/mertctnkaya/lightdesktop.git
    cd lightdesktop
    ```
-3. `Baslat-LightDesktop.bat` dosyasına çift tıklayın (ek bir paket kurulumu gerekmez).
-4. Kendi tek dosyalık taşınabilir `.exe` paketinizi derlemek için PowerShell'de şu komutu çalıştırabilirsiniz:
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\build-portable.ps1
-   ```
-   Çıktı `dist\LightDesktop.exe` olarak oluşturulur.
+3. **`Baslat-LightDesktop.bat`** dosyasına çift tıklayarak canlı geliştirme modunda açabilirsiniz.
+4. Tek dosyalık taşınabilir `.exe` paketini derlemek için **`Derle-LightDesktop-EXE.bat`** dosyasına çift tıklayın (çıktı `dist\LightDesktop.exe` olarak oluşturulur).
 
 ---
 

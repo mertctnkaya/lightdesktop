@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -545,6 +546,7 @@ namespace LightDesktopHost
         private System.Windows.Forms.Timer saveBoundsTimer;
         private NamedPipeServerStream pipeServer;
         private bool pipeStopping;
+        public bool EnablePipeServer = true;
 
         public WebView2WindowForm(string url, string cacheRoot, Action<string> onFallbackRequested)
         {
@@ -562,6 +564,7 @@ namespace LightDesktopHost
 
             webView = new WebView2();
             webView.Dock = DockStyle.Fill;
+            webView.AllowExternalDrop = true;
             webView.DefaultBackgroundColor = Color.FromArgb(24, 24, 24);
             this.Controls.Add(webView);
 
@@ -693,7 +696,7 @@ namespace LightDesktopHost
         private async void OnFormShown(object sender, EventArgs e)
         {
             NativeWin32.EnableDarkTitleBar(this.Handle);
-            StartSingleInstancePipeServer();
+            if (EnablePipeServer) StartSingleInstancePipeServer();
             try
             {
                 string userData = Path.Combine(HostLogger.CacheRoot, "WebView2Data");
@@ -710,6 +713,8 @@ namespace LightDesktopHost
                 webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
                 webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
                 webView.CoreWebView2.Settings.IsZoomControlEnabled = false;
+                webView.CoreWebView2.Settings.IsWebMessageEnabled = true;
+                webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
 
                 webView.CoreWebView2.NewWindowRequested += delegate(object s, CoreWebView2NewWindowRequestedEventArgs ev)
                 {
@@ -746,6 +751,118 @@ namespace LightDesktopHost
             {
                 HostLogger.Log("WebView2 baslatilamadi: " + ex);
                 TriggerFallback(ex.Message);
+            }
+        }
+
+        private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            try
+            {
+                string rawJson = e.WebMessageAsJson;
+                if (string.IsNullOrEmpty(rawJson)) return;
+                JavaScriptSerializer js = new JavaScriptSerializer();
+                Dictionary<string, object> msg = js.Deserialize<Dictionary<string, object>>(rawJson);
+                if (msg == null || !msg.ContainsKey("type")) return;
+                string type = Convert.ToString(msg["type"]);
+
+                if (string.Equals(type, "startNativeFileDrag", StringComparison.Ordinal))
+                {
+                    StringCollection sc = new StringCollection();
+                    List<string> validList = new List<string>();
+                    object rawPathsObj = msg.ContainsKey("paths") ? msg["paths"] : null;
+                    System.Collections.IEnumerable rawEnum = rawPathsObj as System.Collections.IEnumerable;
+                    if (rawEnum != null)
+                    {
+                        foreach (object item in rawEnum)
+                        {
+                            string p = Convert.ToString(item);
+                            if (!string.IsNullOrEmpty(p) && (File.Exists(p) || Directory.Exists(p)))
+                            {
+                                sc.Add(p);
+                                validList.Add(p);
+                            }
+                        }
+                    }
+
+                    DragDropEffects eff = DragDropEffects.None;
+                    if (sc.Count > 0 && (Control.MouseButtons & MouseButtons.Left) == MouseButtons.Left)
+                    {
+                        DataObject dataObj = new DataObject();
+                        dataObj.SetFileDropList(sc);
+                        eff = this.DoDragDrop(dataObj, DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link);
+                    }
+
+                    if (webView != null && webView.CoreWebView2 != null)
+                    {
+                        string respJson = js.Serialize(new
+                        {
+                            type = "nativeDragDone",
+                            effect = eff.ToString(),
+                            paths = validList.ToArray()
+                        });
+                        webView.CoreWebView2.PostWebMessageAsJson(respJson);
+                    }
+                }
+                else if (string.Equals(type, "resolveExternalDrop", StringComparison.Ordinal))
+                {
+                    List<string> droppedPaths = new List<string>();
+                    if (e.AdditionalObjects != null)
+                    {
+                        foreach (object obj in e.AdditionalObjects)
+                        {
+                            CoreWebView2File wf = obj as CoreWebView2File;
+                            if (wf != null && !string.IsNullOrEmpty(wf.Path))
+                            {
+                                droppedPaths.Add(wf.Path);
+                            }
+                        }
+                    }
+                    string targetDir = msg.ContainsKey("targetDir") ? Convert.ToString(msg["targetDir"]) : "";
+                    string targetKind = msg.ContainsKey("targetKind") ? Convert.ToString(msg["targetKind"]) : "dir";
+                    bool ctrlKey = msg.ContainsKey("ctrlKey") && Convert.ToBoolean(msg["ctrlKey"]);
+                    bool shiftKey = msg.ContainsKey("shiftKey") && Convert.ToBoolean(msg["shiftKey"]);
+
+                    if (webView != null && webView.CoreWebView2 != null)
+                    {
+                        string respJson = js.Serialize(new
+                        {
+                            type = "externalDropResolved",
+                            paths = droppedPaths.ToArray(),
+                            targetDir = targetDir,
+                            targetKind = targetKind,
+                            ctrlKey = ctrlKey,
+                            shiftKey = shiftKey
+                        });
+                        webView.CoreWebView2.PostWebMessageAsJson(respJson);
+                    }
+                }
+                else if (string.Equals(type, "openExternal", StringComparison.Ordinal))
+                {
+                    string targetPath = msg.ContainsKey("path") ? Convert.ToString(msg["path"]) : "";
+                    if (!string.IsNullOrEmpty(targetPath) && (File.Exists(targetPath) || Directory.Exists(targetPath)))
+                    {
+                        string workDir = Path.GetDirectoryName(targetPath);
+                        string ext = (Path.GetExtension(targetPath) ?? "").ToLowerInvariant();
+                        ProcessStartInfo psi = new ProcessStartInfo();
+                        if (ext == ".bat" || ext == ".cmd")
+                        {
+                            psi.FileName = "cmd.exe";
+                            psi.Arguments = "/c \"\"" + targetPath + "\"\"";
+                        }
+                        else
+                        {
+                            psi.FileName = targetPath;
+                        }
+                        if (!string.IsNullOrEmpty(workDir)) psi.WorkingDirectory = workDir;
+                        psi.UseShellExecute = true;
+                        psi.WindowStyle = ProcessWindowStyle.Normal;
+                        Process.Start(psi);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                HostLogger.Log("WebMessage hatasi: " + ex.Message);
             }
         }
 
@@ -800,6 +917,15 @@ namespace LightDesktopHost
             fallbackReason = reasonLocal;
             return !needFallback;
         }
+
+        public static Form CreateBackgroundWindow(string url, string runtimeDir, Action<string> onFallback)
+        {
+            string loader = Path.Combine(runtimeDir, "WebView2Loader.dll");
+            if (File.Exists(loader)) NativeWin32.LoadLibrary(loader);
+            WebView2WindowForm form = new WebView2WindowForm(url, HostLogger.CacheRoot, onFallback);
+            form.EnablePipeServer = false;
+            return form;
+        }
     }
 
     internal static class Program
@@ -825,13 +951,38 @@ namespace LightDesktopHost
                 HandleFatalCrash("Kritik Uygulama Hatası", e.ExceptionObject as Exception ?? new Exception(Convert.ToString(e.ExceptionObject)), null);
             };
 
-            string openPath = (args != null && args.Length > 0) ? (args[0] ?? "").Trim().Trim('"') : "";
-            HostLogger.Log("LightDesktop.exe baslatildi. ArgsCount=" + (args == null ? 0 : args.Length) + " OpenPath=" + openPath);
+            string openPath = "";
+            bool backgroundMode = false;
+            if (args != null)
+            {
+                for (int i = 0; i < args.Length; i++)
+                {
+                    string a = (args[i] ?? "").Trim().Trim('"');
+                    if (string.IsNullOrEmpty(a)) continue;
+                    if (string.Equals(a, "--background", StringComparison.OrdinalIgnoreCase) || string.Equals(a, "-bg", StringComparison.OrdinalIgnoreCase))
+                    {
+                        backgroundMode = true;
+                    }
+                    else if (string.IsNullOrEmpty(openPath))
+                    {
+                        openPath = a;
+                    }
+                }
+            }
+            HostLogger.Log("LightDesktop.exe baslatildi. Bg=" + backgroundMode + " OpenPath=" + openPath);
+
+            // Sanal Windows kabuk yollari (Denetim Masasi, Ag, Yazicilar ::{...} veya shell:...) guvenli sekilde Windows Gezgini'ne aktarilir
+            if (!string.IsNullOrEmpty(openPath) && IsVirtualShellPath(openPath))
+            {
+                HostLogger.Log("Sanal shell yolu Explorer'a aktariliyor: " + openPath);
+                try { Process.Start("explorer.exe", "\"" + openPath + "\""); } catch { }
+                return 0;
+            }
 
             // Tek örnek açıksa mevcut pencereye yolu gönder ve hemen çık
-            if (TryForwardToExistingInstance(openPath))
+            if (TryForwardToExistingInstance(backgroundMode ? "__PING__" : openPath))
             {
-                HostLogger.Log("Mevcut acik pencereye yonlendirildi.");
+                HostLogger.Log("Mevcut acik ornege yonlendirildi.");
                 return 0;
             }
 
@@ -886,6 +1037,12 @@ namespace LightDesktopHost
                     string diedOutput = "";
                     int diedCode = 0;
 
+                    if (backgroundMode)
+                    {
+                        RunPersistentBackgroundHost(backend, hasWebView2, runtimeDir);
+                        return 0;
+                    }
+
                     if (hasWebView2)
                     {
                         Form activeUiRef = null;
@@ -932,6 +1089,121 @@ namespace LightDesktopHost
                     }
                 }
             }
+        }
+
+        private static bool IsVirtualShellPath(string p)
+        {
+            if (string.IsNullOrEmpty(p)) return false;
+            if (p.StartsWith("::", StringComparison.Ordinal) || p.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)) return true;
+            if (p.IndexOf("::{", StringComparison.Ordinal) >= 0) return true;
+            return false;
+        }
+
+        private static void RunPersistentBackgroundHost(BackendManager backend, bool hasWebView2, string runtimeDir)
+        {
+            bool stopping = false;
+            Control uiInvoker = new Control();
+            IntPtr h = uiInvoker.Handle; // UI thread handle olustur
+            WebView2WindowForm activeForm = null;
+
+            Action<string> openOrFocus = delegate(string reqPath)
+            {
+                if (string.Equals(reqPath, "__PING__", StringComparison.Ordinal)) return;
+                if (IsVirtualShellPath(reqPath))
+                {
+                    try { Process.Start("explorer.exe", "\"" + reqPath + "\""); } catch { }
+                    return;
+                }
+                if (activeForm != null && !activeForm.IsDisposed)
+                {
+                    activeForm.OpenPathInUi(reqPath);
+                    return;
+                }
+                string url = backend.ReadyUrl;
+                if (!string.IsNullOrEmpty(reqPath))
+                {
+                    url += "/?openPath=" + Uri.EscapeDataString(reqPath);
+                }
+                if (hasWebView2)
+                {
+                    try
+                    {
+                        Form created = WebView2Launcher.CreateBackgroundWindow(url, runtimeDir, delegate
+                        {
+                            hasWebView2 = false;
+                            OpenTargetInBrowser(url);
+                        });
+                        activeForm = created as WebView2WindowForm;
+                        if (activeForm != null)
+                        {
+                            activeForm.FormClosed += delegate { activeForm = null; };
+                            activeForm.Show();
+                            return;
+                        }
+                    }
+                    catch
+                    {
+                        hasWebView2 = false;
+                    }
+                }
+                OpenTargetInBrowser(url);
+            };
+
+            NamedPipeServerStream activePipe = null;
+            Thread pipeThread = new Thread(delegate()
+            {
+                while (!stopping)
+                {
+                    try
+                    {
+                        using (NamedPipeServerStream server = new NamedPipeServerStream(HostConfig.PipeName, PipeDirection.In, 4))
+                        {
+                            activePipe = server;
+                            server.WaitForConnection();
+                            using (StreamReader sr = new StreamReader(server, Encoding.UTF8))
+                            {
+                                string msg = (sr.ReadToEnd() ?? "").Trim();
+                                if (!stopping && !uiInvoker.IsDisposed)
+                                {
+                                    uiInvoker.BeginInvoke((Action)(() => openOrFocus(msg)));
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        if (stopping) break;
+                        Thread.Sleep(250);
+                    }
+                }
+            });
+            pipeThread.IsBackground = true;
+            pipeThread.Start();
+
+            using (NotifyIcon tray = new NotifyIcon())
+            {
+                try { tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+                catch { tray.Icon = SystemIcons.Application; }
+                tray.Text = "LightDesktop — Hazır (Çift tıkla aç)";
+                tray.Visible = true;
+
+                ContextMenuStrip menu = new ContextMenuStrip();
+                menu.Items.Add("LightDesktop'ı Aç", null, delegate { openOrFocus(""); });
+                menu.Items.Add("Log Klasörünü Aç", null, delegate { try { Process.Start("explorer.exe", HostLogger.CacheRoot); } catch { } });
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add("Çıkış (LightDesktop'ı Kapat)", null, delegate
+                {
+                    stopping = true;
+                    try { if (activePipe != null) activePipe.Dispose(); } catch { }
+                    if (activeForm != null && !activeForm.IsDisposed) activeForm.Close();
+                    Application.ExitThread();
+                });
+                tray.ContextMenuStrip = menu;
+                tray.DoubleClick += delegate { openOrFocus(""); };
+                Application.Run();
+            }
+            stopping = true;
+            try { if (activePipe != null) activePipe.Dispose(); } catch { }
         }
 
         private static bool CheckWebView2Safe(string runtimeDir, out string status)

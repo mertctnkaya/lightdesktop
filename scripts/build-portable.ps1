@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
+$root = Split-Path -Parent $PSScriptRoot
+$srcDir = Join-Path $root 'src'
 $toolsDir = Join-Path $root '.build-tools'
 $wv2Dir = Join-Path $toolsDir 'webview2'
 $stagingDir = Join-Path $toolsDir 'staging'
@@ -52,9 +53,9 @@ if (Test-Path $stagingDir) { Remove-Item $stagingDir -Recurse -Force }
 New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
 
 Copy-Item -Path $nodeExe -Destination (Join-Path $stagingDir 'node.exe') -Force
-Copy-Item -Path (Join-Path $root 'server.js') -Destination (Join-Path $stagingDir 'server.js') -Force
-Copy-Item -Path (Join-Path $root 'indexer-and-thumbs.js') -Destination (Join-Path $stagingDir 'indexer-and-thumbs.js') -Force
-Copy-Item -Path (Join-Path $root 'public') -Destination (Join-Path $stagingDir 'public') -Recurse -Force
+Copy-Item -Path (Join-Path $srcDir 'server.js') -Destination (Join-Path $stagingDir 'server.js') -Force
+Copy-Item -Path (Join-Path $srcDir 'indexer-and-thumbs.js') -Destination (Join-Path $stagingDir 'indexer-and-thumbs.js') -Force
+Copy-Item -Path (Join-Path $srcDir 'public') -Destination (Join-Path $stagingDir 'public') -Recurse -Force
 Copy-Item -Path $coreDll, $wfDll, $loaderDll -Destination $stagingDir -Force
 
 # 4. Payload ZIP Olustur (Optimal Sikistirma)
@@ -66,14 +67,16 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($stagingDir, $payloadZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 
 $payloadHash = (Get-FileHash -Path $payloadZip -Algorithm SHA256).Hash.Substring(0, 12).ToLowerInvariant()
-$buildStamp = "v150-$payloadHash"
+$buildStamp = "v151-$payloadHash"
 
 # 5. C# Kaynak Koduna Build Stamp Yerlestir ve Tek EXE Olarak Derle
-$hostCsSrc = Get-Content -Path (Join-Path $root 'portable\LightDesktopHost.cs') -Raw -Encoding UTF8
+$hostCsSrc = Get-Content -Path (Join-Path $PSScriptRoot 'LightDesktopHost.cs') -Raw -Encoding UTF8
 $genCsPath = Join-Path $toolsDir 'LightDesktopHost.gen.cs'
 $hostCsSrc.Replace('__BUILD_STAMP__', $buildStamp) | Set-Content -Path $genCsPath -Encoding UTF8
 
-$icoPath = Join-Path $root 'public\favicon.ico'
+$icoPath = Join-Path $srcDir 'public\favicon.ico'
+$tempOutExe = Join-Path $toolsDir 'LightDesktop.build.exe'
+if (Test-Path $tempOutExe) { Remove-Item $tempOutExe -Force -ErrorAction SilentlyContinue }
 $cscArgs = @(
   '/nologo',
   '/target:winexe',
@@ -90,7 +93,7 @@ $cscArgs = @(
   '/reference:System.Web.Extensions.dll',
   ("/reference:" + $coreDll),
   ("/reference:" + $wfDll),
-  ("/out:" + $outExe),
+  ("/out:" + $tempOutExe),
   $genCsPath
 )
 
@@ -98,6 +101,66 @@ Write-Host "Tek dosya LightDesktop.exe derleniyor (Stamp: $buildStamp)..."
 & $cscPath @cscArgs
 if ($LASTEXITCODE -ne 0) {
   throw "csc.exe derleme hatasi verdi (ExitCode=$LASTEXITCODE)"
+}
+
+function Install-PortableBinary([string]$srcPath, [string]$destPath, [bool]$stopLockersOnFail, [bool]$relaunchIfStopped) {
+  $fullDest = [System.IO.Path]::GetFullPath($destPath)
+  $oldPath = $fullDest + '.old'
+  if (Test-Path -LiteralPath $oldPath) {
+    Remove-Item -LiteralPath $oldPath -Force -ErrorAction SilentlyContinue
+  }
+
+  $copied = $false
+  try {
+    Copy-Item -LiteralPath $srcPath -Destination $fullDest -Force
+    $copied = $true
+  } catch {
+    if (Test-Path -LiteralPath $fullDest) {
+      try {
+        Move-Item -LiteralPath $fullDest -Destination $oldPath -Force
+        Copy-Item -LiteralPath $srcPath -Destination $fullDest -Force
+        $copied = $true
+      } catch {}
+    }
+  }
+
+  $stopped = $false
+  if (-not $copied -and $stopLockersOnFail) {
+    $lockingProcs = @(Get-Process -Name 'LightDesktop' -ErrorAction SilentlyContinue | Where-Object {
+      try { $_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -ieq $fullDest) } catch { $false }
+    })
+    if ($lockingProcs.Count -gt 0) {
+      Write-Host ("Hedef EXE kilitli (" + $lockingProcs.Count + " surec), degistirmek icin kapatiliyor: " + $fullDest)
+      $lockingProcs | Stop-Process -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Milliseconds 450
+      $stopped = $true
+    }
+    Copy-Item -LiteralPath $srcPath -Destination $fullDest -Force
+    $copied = $true
+  }
+
+  if ($copied) {
+    Remove-Item -LiteralPath $oldPath -Force -ErrorAction SilentlyContinue
+  }
+  if ($stopped -and $relaunchIfStopped) {
+    Start-Process -FilePath $fullDest | Out-Null
+  }
+  return $copied
+}
+
+Install-PortableBinary -srcPath $tempOutExe -destPath $outExe -stopLockersOnFail $true -relaunchIfStopped $true | Out-Null
+Remove-Item -Path $tempOutExe -Force -ErrorAction SilentlyContinue
+
+# Eger sabit kurulum (%LOCALAPPDATA%\LightDesktop\LightDesktop.exe) varsa kilidi bozmadan in-place guncelle
+if ($env:LOCALAPPDATA) {
+  $fixedExe = Join-Path $env:LOCALAPPDATA 'LightDesktop\LightDesktop.exe'
+  if (Test-Path $fixedExe) {
+    if (Install-PortableBinary -srcPath $outExe -destPath $fixedExe -stopLockersOnFail $false -relaunchIfStopped $false) {
+      Write-Host ("Sabit konum EXE de guncellendi: " + $fixedExe)
+    } else {
+      Write-Host ("Bilgi: Sabit konum EXE guncellenemedi (" + $fixedExe + ").")
+    }
+  }
 }
 
 $exeItem = Get-Item $outExe
@@ -108,3 +171,4 @@ Write-Host ("BASARILI! Portable EXE hazir: " + $exeItem.FullName)
 Write-Host ("Acik toplam boyut : {0:N1} MB" -f ($rawBytes / 1MB))
 Write-Host ("Sikistirilmis ZIP : {0:N1} MB" -f ($zipItem.Length / 1MB))
 Write-Host ("Nihai EXE boyutu  : {0:N1} MB ({1:N0} bayt)" -f ($exeItem.Length / 1MB), $exeItem.Length)
+exit 0

@@ -3,8 +3,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
-$logFile = Join-Path $root 'logs.txt'
+$root = Split-Path -Parent $PSScriptRoot
+$srcDir = Join-Path $root 'src'
+$cacheDir = Join-Path $env:LOCALAPPDATA 'LightDesktopCache'
+New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+$logFile = Join-Path $cacheDir 'logs.txt'
 $baseUrl = 'http://127.0.0.1:3847'
 $port = 3847
 
@@ -59,8 +62,14 @@ try {
     $needsRestart = $false
     if ($health.legacy) {
       $needsRestart = $true
-    } elseif ($health.currentCodeMtimeMs -and $health.startCodeMtimeMs -and ([double]$health.currentCodeMtimeMs -gt [double]$health.startCodeMtimeMs) -and (-not $health.busy)) {
-      $needsRestart = $true
+    } elseif (-not $health.busy) {
+      if (-not $health.currentCodeMtimeMs -or ([double]$health.currentCodeMtimeMs -le 0)) {
+        $needsRestart = $true
+      } elseif (-not $health.serverDir -or ($health.serverDir.ToString().TrimEnd('\') -ine $srcDir.TrimEnd('\'))) {
+        $needsRestart = $true
+      } elseif ($health.startCodeMtimeMs -and ([double]$health.currentCodeMtimeMs -gt [double]$health.startCodeMtimeMs)) {
+        $needsRestart = $true
+      }
     }
     if ($needsRestart) {
       Write-Log 'Sunucu kodu guncellenmis, sunucu yenileniyor...'
@@ -87,7 +96,7 @@ try {
       exit 1
     }
 
-    $proc = Start-Process -FilePath $nodeCmd.Source -ArgumentList '--no-warnings','server.js' -WorkingDirectory $root -WindowStyle Hidden -PassThru
+    $proc = Start-Process -FilePath $nodeCmd.Source -ArgumentList '--no-warnings','server.js' -WorkingDirectory $srcDir -WindowStyle Hidden -PassThru
     $ready = $false
     for ($i = 0; $i -lt 35; $i++) {
       Start-Sleep -Milliseconds 180
