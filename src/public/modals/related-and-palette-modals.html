@@ -1,0 +1,88 @@
+  <!-- Akıllı İlişkili & Benzer Dosya Bulucu Modalı -->
+  <dialog id="related-dialog" class="modal-dialog related-dialog" closedby="any" aria-labelledby="related-dlg-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span class="props-icon">✨</span>
+        <div style="min-width:0;">
+          <strong id="related-dlg-title">Benzer ve Yakın Zamanlı Dosyaları Bul</strong>
+          <div id="related-dlg-sub" class="muted-text" style="word-break:break-all;"></div>
+        </div>
+      </div>
+      <button type="button" id="btn-rel-dlg-close" class="icon-btn">✕</button>
+    </div>
+    <div class="settings-body">
+      <div class="rel-dlg-options">
+        <label class="rel-opt-field">
+          <span>Nerede Aransın?</span>
+          <select id="rel-dlg-scope">
+            <option value="folder">📂 Bu Klasör (Canlı, İndeks Gerekmez)</option>
+            <option value="drive">💽 Bu Diskin Tamamı (İndeksten)</option>
+            <option value="all">🌐 Tüm İndeksli Diskler</option>
+          </select>
+        </label>
+        <label class="rel-opt-field">
+          <span>Dosya Türü</span>
+          <select id="rel-dlg-cat">
+            <option value="media">🖼️ Video &amp; Fotoğraf / İlgili Tür</option>
+            <option value="exact">📌 Yalnızca Tam Aynı Uzantı/Tür</option>
+            <option value="all">📑 Tüm Dosya Türleri</option>
+          </select>
+        </label>
+      </div>
+      <div class="rel-cards-grid">
+        <button type="button" class="rel-card" data-rel-pick="nearTime">
+          <div class="rel-card-title">🕐 Yakın Saat (±1 saat)</div>
+          <div id="rel-desc-nearTime" class="rel-card-desc">Aynı çekim / kayıt anına çok yakın dosyalar</div>
+        </button>
+        <button type="button" class="rel-card" data-rel-pick="sameDay">
+          <div class="rel-card-title">📅 Aynı Gün</div>
+          <div id="rel-desc-sameDay" class="rel-card-desc">Aynı gün içindeki tüm kayıtlar</div>
+        </button>
+        <button type="button" class="rel-card" data-rel-pick="sameWeek">
+          <div class="rel-card-title">📆 Aynı Hafta (±3 gün)</div>
+          <div id="rel-desc-sameWeek" class="rel-card-desc">O günün birkaç gün öncesi ve sonrası</div>
+        </button>
+        <button type="button" class="rel-card" data-rel-pick="sameMonth">
+          <div class="rel-card-title">🗓️ Aynı Ay</div>
+          <div id="rel-desc-sameMonth" class="rel-card-desc">Aynı ay içinde oluşturulmuş dosyalar</div>
+        </button>
+        <button type="button" class="rel-card rel-card-wide" data-rel-pick="similarName">
+          <div class="rel-card-title">🔤 Benzer İsimliler / Seri Dosyalar</div>
+          <div id="rel-desc-similarName" class="rel-card-desc">Dosya adındaki ortak kelimelere veya isim kalıbına göre eşleştirir</div>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Akıllı Komut & Hızlı Gezinti Paleti (Ctrl+K) -->
+  <dialog id="command-palette-dialog" class="modal-dialog cmd-palette-dialog" closedby="any" aria-label="Akıllı Komut Paleti">
+    <div class="cmd-palette-head">
+      <span>⌘</span>
+      <input id="cmd-palette-input" type="text" spellcheck="false" autocomplete="off" placeholder="Komut çalıştır, klasöre git veya filtre yaz (örn: > 100mb video, bugün, analiz)..." />
+      <span class="muted-text" style="font-size:11px;">ESC</span>
+    </div>
+    <div id="cmd-palette-list" class="cmd-palette-list"></div>
+  </dialog>
+
+  <!-- Geçici Yüzen Raf (Drag Shelf) -->
+  <div id="drag-shelf" class="drag-shelf hidden">
+    <div class="drag-shelf-head">
+      <strong>🧲 Geçici Raf (<span id="drag-shelf-count">0</span>)</strong>
+      <div style="display:flex;gap:4px;">
+        <button type="button" id="btn-shelf-clear" class="mini-pill-btn" title="Rafı Temizle">🧹</button>
+        <button type="button" id="btn-shelf-close" class="mini-pill-btn" title="Rafı Gizle">✕</button>
+      </div>
+    </div>
+    <div id="drag-shelf-list" class="drag-shelf-list">
+      <div class="drag-shelf-empty muted-text">Dosyaları buraya sürükleyip başka klasörde tek hamlede bırakabilirsiniz.</div>
+    </div>
+    <div class="drag-shelf-footer">
+      <div id="drag-shelf-drag-handle" class="drag-shelf-handle hidden" draggable="true" title="Raftaki tüm dosyaları hedef klasöre veya masaüstüne sürükle">🧲 Tümünü Sürükle</div>
+      <div class="drag-shelf-btns">
+        <button type="button" id="btn-shelf-move-here" class="cmd-btn small primary" disabled title="Raftakileri açık klasöre taşı">📦 Buraya Taşı</button>
+        <button type="button" id="btn-shelf-copy-here" class="cmd-btn small" disabled title="Raftakileri açık klasöre kopyala">📋 Kopyala</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="col-filter-popover" class="col-filter-popover" popover="manual" role="menu"></div>

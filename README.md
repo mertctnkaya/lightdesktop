@@ -27,13 +27,13 @@ Hiçbir ek program yüklemeden doğrudan kullanmak için:
 ### Seçenek 2: Kaynak Koddan Çalıştırma ve Derleme (Geliştiriciler İçin)
 
 1. Bilgisayarınızda **Node.js (v22 veya üzeri)** kurulu olmalıdır.
-2. Bu depoyu indirin veya klonlayın (`src/` içinde kaynak kodlar, `scripts/` içinde çalıştırma/derleme betikleri bulunur):
+2. Bu depoyu indirin veya klonlayın (5S modüler mimaride `src/backend/`, `src/indexer/`, `src/public/{modals,css,js}/` ve `scripts/host/` klasörlerine ayrılmıştır; sıfır NPM bağımlılığı, RAM statik önbelleği ve bloklamayan hızlı açılış ön-ısıtması ile çalışır):
    ```bat
    git clone https://github.com/mertctnkaya/lightdesktop.git
    cd lightdesktop
    ```
 3. **`Baslat-LightDesktop.bat`** dosyasına çift tıklayarak canlı geliştirme modunda açabilirsiniz.
-4. Tek dosyalık taşınabilir `.exe` paketini derlemek için **`Derle-LightDesktop-EXE.bat`** dosyasına çift tıklayın (çıktı `dist\LightDesktop.exe` olarak oluşturulur).
+4. Tek dosyalık taşınabilir `.exe` paketini derlemek için **`Derle-LightDesktop-EXE.bat`** dosyasına çift tıklayın (derleme öncesi otomatik `node scripts\verify-5s.js` doğrulaması çalışır ve çıktı `dist\LightDesktop.exe` olarak oluşturulur).
 
 ---
 
@@ -58,7 +58,9 @@ Hiçbir ek program yüklemeden doğrudan kullanmak için:
 
 Harici bir fotoğraf veya video oynatıcı açıp kapatma derdini bitirir:
 
-- Herhangi bir dosyada **`Space` (Boşluk)** tuşuna bastığınızda veya fotoğraf, GIF ya da videolara **çift tıkladığınızda** (Ayarlar'dan değiştirilebilir) ekranın %70'inden fazlasını kaplayan büyük dahili önizleme penceresi açılır; dilediğiniz an üstteki **Varsayılan Uygulamada Aç** düğmesine de geçebilirsiniz.
+- Herhangi bir dosyada **`Space` (Boşluk)** tuşuna bastığınızda veya fotoğraf, GIF, video, **PDF**, **metin/kod** dosyalarına **çift tıkladığınızda** (Ayarlar'dan değiştirilebilir) ekranın %70'inden fazlasını kaplayan büyük dahili önizleme penceresi açılır; dilediğiniz an üstteki **Varsayılan Uygulamada Aç** düğmesine de geçebilirsiniz.
+- **Dahili PDF, Metin, Kod & Markdown Editörü:** PDF dosyalarını doğrudan dahili okuyucuda açabilir; `.txt`, `.log`, `.json`, `.csv`, `.xml`, `.yaml`, `.ini`, uzantısız proje dosyalarını (`Makefile`, `Dockerfile`, `LICENSE`, `.env` vb.) ve kaynak kod dosyalarını (`js`, `ts`, `py`, `cs`, `html`, `css`, `sql`, `ps1` vb.) koyu temalı metin editöründe düzenleyip **`Ctrl+S`** ile kaydedebilirsiniz. `.md` dosyaları zengin **Markdown Önizleme** modunda açılır (tek tıkla düzenlemeye geçilebilir); `.json` dosyalarında **Biçimlendir**, `.csv/.tsv` dosyalarında **Tablo Görünümü** bulunur.
+- **Dahili ZIP Arşiv Yöneticisi (Açma, Ayıklama & Sıkıştırma):** `.zip` dosyalarına çift tıklayarak veya sağ tıktan açılan pencerede arşiv içindeki dosya/klasörleri arayabilir, **checkbox / `Ctrl` / `Shift`** ile tekil veya toplu seçip yalnızca seçtiklerinizi ayıklayabilir ya da sağ menüden tek tıkla **Buraya Ayıkla / Klasöre Ayıkla / ZIP Olarak Sıkıştır** işlemlerini yapabilirsiniz.
 - **Videodan Kare Kare İlerleme (`,` / `.`), Kare Yakalama (`S`) & Kayıpsız Kırpma (`✂️ Kırp`):** Video izlerken **`⏮ Kare`** / **`Kare ⏭`** düğmeleri veya **`,` / `.`** tuşlarıyla kare kare (`Shift` ile 5'er kare) geri/ileri gidebilir; **`S`** tuşu veya **`📸 Kare Al`** ile tam o kareyi yüksek çözünürlükte JPEG olarak (videonun yanına ya da Ayarlar → **Yollar & Kayıt Konumları** bölümünden seçtiğiniz özel klasöre) kaydedebilirsiniz. **`✂️ Kırp`** ile görsel zaman çizelgesinden **A–B** tutamaçlarını sürükleyerek (ve **`▶ Seçimi Oynat`** ile önizleyerek) FFmpeg üzerinden yeniden kodlamadan (`-c copy`) orijinal dosyaya dokunmadan saniyeler içinde yeni kırpılmış klip oluşturabilirsiniz; kırpılan videoların varsayılan kayıt klasörünü de Ayarlar'dan seçebilirsiniz.
 - **Tek Tuşla Karar Ver ve Sonrakine Geç:**
   - Beğendiklerinizi **`B`** tuşuyla **Sepet**'e atın; otomatik olarak bir sonraki fotoğraf/videoya geçer. (Önizlemedeyken **`Sepette ✓`** butonuna veya **`B`** tuşuna basarak öğeyi sepetten çıkarabilirsiniz `(v1.1.0)`.)
@@ -111,20 +113,21 @@ _"IMG_1050 ile IMG_1420 arasını seç"_, _"100 MB'tan büyük videoları bul"_ 
 - **Klasör Boyutları (`📏 Boyutlar`):** Klasör açılışını yavaşlatmamak için yalnızca siz istediğinizde alt klasörlerin gerçek boyutlarını hesaplar ve büyükten küçüğe sıralar.
 - **Disk İndeksleme (`⚡ İndeksle`) ve Anlık Arama:** Seçtiğiniz diski diski yormadan hızlıca dizine ekler; böylece _"Bu Klasör"_, _"Bu Disk"_ veya _"Tüm Diskler"_ kapsamında milisaniyeler içinde arama yapabilirsiniz.
 - **Disk Analizi (`📊 Analiz`):** Hangi dosya türlerinin diskinizi doldurduğunu, en büyük dosyaları ve en çok yer kaplayan klasörleri gösterir.
-- **Birebir Kopya Bulucu:** Gereksiz yer kaplayan birebir kopya dosyaları güvenli kontrollerle tespit edip temizlemenizi sağlar (sistem ve program dosyalarını otomatik olarak korur).
+- **Birebir Kopya Bulucu:** Gereksiz yer kaplayan birebir kopya dosyaları güvenli kontrollerle tespit eder (sistem ve program dosyalarını otomatik korur). **Yazılım Projesi Koruması (`💻 Yazılım projelerini koru` — varsayılan açık)** sayesinde `.git`, `package.json`, Capacitor/Android `assets/`, `dist/` ve `build/` gibi proje varlıkları (logo, ikon, derleme çıktıları vb.) otomatik korunur ve kaç proje dosyasının hariç tutulduğu size bildirilir (isterseniz tek tıkla kapatabilirsiniz). Tüm fazlaları topluca çöpe atabileceğiniz gibi **`Ctrl+Tık` / `Shift+Tık`** ile tekil veya aralık seçip **`Del`** / sağ tık ya da satır üzerindeki hover **`🗑️` (Çöpe At) / `👁️` (Önizle)** butonlarıyla kontrollü biçimde temizleyebilirsiniz; silinen dosyalar listeden ve grup sayaçlarından anında düşer.
 
 ### 8. Güvenli Silme, Dahili Geri Dönüşüm Kutusu ve Geri Alma (`Ctrl+Z`)
 
 - Yanlışlıkla sildiğiniz, yeniden adlandırdığınız, taşıdığınız veya yeni klasöre koyduğunuz işlemleri **`Ctrl+Z`** ile geri alabilirsiniz.
 - Normal silme (`Del`) dosyaları her zaman **Windows Geri Dönüşüm Kutusu**'na gönderir. Uygulama içindeki **🗑️ Geri Dönüşüm Kutusu** görünümünden sildiklerinizi tek tek veya topluca geri yükleyebilirsiniz. (Kalıcı silme yalnızca siz özellikle **`Shift+Del`** veya sağ tıktan **Kalıcı Sil** dediğinizde çalışır.)
+- **Gizli 30 Günlük Koruma Kasası (`Ctrl+,` → Ayarlar):** Ayarlar'dan korunan klasör yolları belirleyebilirsiniz; bu klasörlerden **`Shift+Del`** ile kalıcı silinen veya **Çöp Kutusu'ndan kalıcı silinen/boşaltılan** öğeler kullanıcıya normal silinmiş gibi gösterilir ama gizli kasada **30 gün** boyunca saklanır ve yalnızca Ayarlar içinden geri yüklenebilir (listedeki dışındaki diğer tüm yollar doğrudan kalıcı silinir).
 
 ### 9. Özellikler, Toplu Adlandırma ve Ayarlar Merkezi (`Ctrl+,`)
 
 - **Toplu Yeniden Adlandırma (`F2`):** Birden fazla dosya seçiliyken `F2` tuşuna basarsanız desen/sıra numaralı toplu isimlendirme açılır.
 - **Özellikler (`Alt+Enter`):** Tekli veya çoklu seçilen dosya ve klasörlerin toplam gerçek boyutunu, dosya sayısını ve tarihlerini gösterir; `Konum` ve `Tam Yol` satırları seçilebilir ve tek tıkla kopyalanabilir `(v1.1.0)`.
 - **Windows Sistem Entegrasyonu & Kurulum Sihirbazı `(v1.1.0)`:** İlk kurulum sihirbazı veya Ayarlar üzerinden tek tıkla sabit konuma kurulum (`%LOCALAPPDATA%\LightDesktop`), Masaüstü/Başlat menüsü kısayolu (`Ctrl+Alt+E`), klasör sağ tık menüsü, sistem tepsisinde arka planda hazır bekleme (`--background`) ve istendiğinde Windows Gezgini'ne tek tıkla geri döndürülebilen **Varsayılan Klasör Gezgini** modu yönetilebilir (`Denetim Masası` gibi sanal sistem klasörleri otomatik olarak Windows Gezgini'nde açılır).
-- **Ayarlar Merkezi (`⚙️ Ayarlar`):** Varsayılan görünüm modu, varsayılan kapak yükleme modu, kenar çubuğu genişliği, silme onayı, yeni sekme başlangıç konumu, görsel parlaklık ve önizleme tercihleri gibi pek çok ayarı kendinize göre özelleştirebilirsiniz.
-- **Hata ve Teşhis Merkezi (`⚠️ Hatalar`):** Beklenmedik bir sorun yaşarsanız uygulama mümkün olan her durumda çalışmayı sürdürür (bozuk indeks veritabanı otomatik onarılır) ve **🩺 Teşhis Raporu Kopyala** ile tek tıkla paylaşılabilir ayrıntılı hata raporu hazırlar `(v1.1.0)`.
+- **Ayarlar Merkezi (`⚙️ Ayarlar`):** Varsayılan görünüm modu, varsayılan kapak yükleme modu, kenar çubuğu genişliği, silme onayı, yeni sekme başlangıç konumu, görsel parlaklık ve önizleme tercihleri gibi pek çok ayarı kendinize göre özelleştirebilirsiniz. Tüm konum seçimlerinde (`Gözat...` / `Korunan Klasör Ekle`) arka plana düşmeyen koyu temalı **dahili hızlı klasör seçici** kullanılır.
+- **Hata ve Teşhis Merkezi (`⚠️ Hatalar`):** Beklenmedik bir sorun yaşarsanız uygulama mümkün olan her durumda çalışmayı sürdürür (bozuk indeks veritabanı otomatik onarılır); log/hata satırları mouse ile doğrudan seçilebilir ve **🩺 Teşhis Raporu Kopyala** ile tek tıkla paylaşılabilir ayrıntılı hata raporu hazırlanır `(v1.1.0)`.
 
 ---
 

@@ -1,0 +1,52 @@
+  <!-- İlk Açılış / Hızlı Kurulum Sihirbazı -->
+  <dialog id="welcome-setup-dialog" class="modal-dialog welcome-dialog" closedby="any" aria-labelledby="welcome-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span class="props-icon">🚀</span>
+        <div>
+          <strong id="welcome-title">LightDesktop'a Hoş Geldiniz — Hızlı Entegrasyon</strong>
+          <div class="muted-text">Uygulamayı Windows Gezgini kadar hızlı açabilmeniz için tek tık kurulumu</div>
+        </div>
+      </div>
+      <button type="button" id="btn-wel-close" class="icon-btn">✕</button>
+    </div>
+    <div class="settings-body">
+      <div class="settings-group">
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>📌 Masaüstü &amp; Başlat Menüsü Kısayolu (Ctrl+Alt+E) + Sağ Tık</strong>
+            <span class="muted-text">Her klasörde "LightDesktop ile Aç" sağ tık menüsü, Başlat Menüsü araması ve Ctrl+Alt+E kısayolu kurar</span>
+          </div>
+          <input type="checkbox" id="wel-shortcuts" checked />
+        </label>
+        <label id="wel-fixed-row" class="settings-row settings-check hidden">
+          <div class="settings-label-wrap">
+            <strong>💾 Sabit Konuma Kur (%LOCALAPPDATA%\LightDesktop)</strong>
+            <span class="muted-text">İndirdiğiniz dosyayı silseniz veya taşısanız bile kısayolların bozulmamasını sağlar</span>
+          </div>
+          <input type="checkbox" id="wel-fixed" checked />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>📂 Varsayılan Klasör Gezgini Yap (Önerilen)</strong>
+            <span class="muted-text">Klasörler çift tıkta LightDesktop ile açılır; istediğiniz an Ayarlar'dan tek tıkla Windows Gezgini'ne dönebilirsiniz</span>
+          </div>
+          <input type="checkbox" id="wel-default-explorer" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>⚡ Windows Açılışında Arka Planda Hazır Bekle</strong>
+            <span class="muted-text">Sistem tepsisinde hafifçe bekleyerek pencereleri ~0.1 saniyede açar</span>
+          </div>
+          <input type="checkbox" id="wel-autostart" />
+        </label>
+      </div>
+      <div class="muted-text" style="font-size:11.5px;line-height:1.45;">
+        💡 Bu pencereyi kapatsanız bile tüm ayarları istediğiniz zaman sağ üstteki <b>⚙️ Ayarlar → Windows Entegrasyonu</b> altından değiştirebilirsiniz.
+      </div>
+    </div>
+    <div class="props-footer">
+      <button type="button" id="btn-wel-skip" class="cmd-btn">Şimdi Değil</button>
+      <button type="button" id="btn-wel-apply" class="cmd-btn primary">✓ Seçilenleri Uygula</button>
+    </div>
+  </dialog>

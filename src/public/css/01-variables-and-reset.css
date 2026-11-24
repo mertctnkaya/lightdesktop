@@ -1,0 +1,75 @@
+:root {
+  color-scheme: dark;
+  --bg-main: #191919;
+  --bg-chrome: #202020;
+  --bg-elevated: #282828;
+  --bg-card: #242424;
+  --bg-hover: #2d2d2d;
+  --bg-selected: #283b4e;
+  --bg-selected-border: #0078d4;
+  --border: #333333;
+  --text: #f0f0f0;
+  --text-muted: #9e9e9e;
+  --accent: #0078d4;
+  --accent-hover: #1a86d8;
+  --danger: #c42b1c;
+  --success: #10893e;
+  --warning: #ca5010;
+  --radius: 6px;
+  --scrollbar-thumb: #585858;
+  --scrollbar-track: #1b1b1b;
+  accent-color: var(--accent);
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
+}
+
+* {
+  box-sizing: border-box;
+  user-select: none;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-main);
+  color: var(--text);
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+}
+
+input, select, button {
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+input[type="text"], input[type="search"], input[type="number"], input[type="date"], select {
+  background: #1c1c1c;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  padding: 4px 8px;
+  outline: none;
+  user-select: text;
+}
+
+input:focus, select:focus {
+  border-color: var(--accent);
+}
+
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover { background: #6b6b6b; }
+}
+
+.hidden { display: none !important; }
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+

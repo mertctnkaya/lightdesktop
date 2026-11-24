@@ -1,0 +1,200 @@
+/* Sekme Çubuğu */
+.tab-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 4px 10px 0;
+  background: #141414;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs-list {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  max-width: calc(100% - 390px);
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 31px;
+  min-width: 120px;
+  max-width: 210px;
+  padding: 0 10px;
+  background: #1c1c1c;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.tab-item:hover { background: #242424; color: var(--text); }
+.tab-item.active {
+  background: var(--bg-chrome);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.tab-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.tab-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 11px;
+}
+.tab-close:hover { background: #3b3b3b; color: #fff; }
+
+.tab-strip-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  background: #1e1e1e;
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+.status-pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+.status-pill.indexing .dot {
+  background: #f7b500;
+  animation: pulse 1s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.mini-pill-btn {
+  background: #272727;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 11.5px;
+}
+.mini-pill-btn:hover { background: #343434; }
+.mini-pill-btn.danger:hover { background: var(--danger); border-color: var(--danger); }
+
+/* Gezinti Çubuğu */
+.nav-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-chrome);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-buttons {
+  display: flex;
+  gap: 2px;
+}
+
+.icon-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  width: 30px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text);
+}
+.icon-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.icon-btn:disabled { opacity: 0.35; cursor: default; }
+.icon-btn.small { width: 24px; height: 24px; font-size: 11px; }
+
+.address-bar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 30px;
+  background: #181818;
+  border: 1px solid #353535;
+  border-radius: 5px;
+  padding: 0 8px;
+  overflow: hidden;
+  cursor: text;
+}
+.address-bar:focus-within { border-color: var(--accent); }
+
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.breadcrumbs::-webkit-scrollbar { display: none; }
+
+.crumb-btn {
+  background: transparent;
+  border: none;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.crumb-btn:hover { background: var(--bg-hover); }
+.crumb-sep { color: var(--text-muted); font-size: 11px; }
+
+.address-input {
+  width: 100%;
+  border: none !important;
+  background: transparent !important;
+  padding: 2px 4px !important;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #181818;
+  border: 1px solid #353535;
+  border-radius: 5px;
+  padding: 2px 6px;
+  width: 330px;
+}
+.search-box:focus-within { border-color: var(--accent); }
+.search-scope {
+  border: none !important;
+  background: #252525 !important;
+  font-size: 11.5px;
+  padding: 2px 4px !important;
+}
+.search-box input {
+  flex: 1;
+  border: none !important;
+  background: transparent !important;
+  min-width: 0;
+}
+

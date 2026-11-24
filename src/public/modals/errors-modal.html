@@ -1,0 +1,24 @@
+  <!-- Hatalar ve logs.txt Merkezi Modalı -->
+  <dialog id="errors-dialog" class="modal-dialog errors-dialog" closedby="any" aria-labelledby="errors-dialog-title">
+    <div class="errors-dialog-head">
+      <div>
+        <strong id="errors-dialog-title">⚠️ İşlem Hataları ve Günlük (logs.txt)</strong>
+        <div id="errors-dialog-sub" class="muted-text" style="font-size:11.5px;"></div>
+      </div>
+      <div class="errors-dialog-actions">
+        <button id="btn-err-refresh" class="cmd-btn">🔄 Yenile</button>
+        <button id="btn-err-open-file" class="cmd-btn">📂 logs.txt Aç</button>
+        <button id="btn-err-diag-copy" class="cmd-btn accent-btn" title="Geliştiriciye göndermek için sistem + hata + log raporunu kopyala">🩺 Teşhis Raporu Kopyala</button>
+        <button id="btn-err-copy" class="cmd-btn">📋 Logu Kopyala</button>
+        <button id="btn-err-clear" class="cmd-btn danger-hover">🧹 Listeyi Temizle</button>
+        <button id="btn-err-close" class="icon-btn">✕</button>
+      </div>
+    </div>
+    <div class="errors-dialog-body">
+      <div id="diag-env-line" class="diag-env-bar">Ortam bilgisi yükleniyor...</div>
+      <div class="errors-section-title">Yakalanan İşlem Hataları</div>
+      <div id="errors-list" class="errors-list"></div>
+      <div class="errors-section-title" style="margin-top:12px;">logs.txt (Son Kayıtlar)</div>
+      <pre id="errors-logs-tail" class="errors-logs-tail"></pre>
+    </div>
+  </dialog>

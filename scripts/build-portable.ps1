@@ -48,14 +48,20 @@ if (-not ((Test-Path $coreDll) -and (Test-Path $wfDll) -and (Test-Path $loaderDl
   Remove-Item $nupkgPath -Force -ErrorAction SilentlyContinue
 }
 
-# 3. Runtime Paketini Hazirla (node.exe + uygulama dosyalari + WebView2 DLL)
+# 3. 5S Mimarisi Dogrulamasi & Runtime Paketini Hazirla (node.exe + uygulama dosyalari + WebView2 DLL)
+$verifyScript = Join-Path $PSScriptRoot 'verify-5s.js'
+if (Test-Path $verifyScript) {
+  & $nodeExe $verifyScript
+  if ($LASTEXITCODE -ne 0) {
+    throw "5S dogrulamasi basarisiz oldu (ExitCode=$LASTEXITCODE)"
+  }
+}
+
 if (Test-Path $stagingDir) { Remove-Item $stagingDir -Recurse -Force }
 New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
 
 Copy-Item -Path $nodeExe -Destination (Join-Path $stagingDir 'node.exe') -Force
-Copy-Item -Path (Join-Path $srcDir 'server.js') -Destination (Join-Path $stagingDir 'server.js') -Force
-Copy-Item -Path (Join-Path $srcDir 'indexer-and-thumbs.js') -Destination (Join-Path $stagingDir 'indexer-and-thumbs.js') -Force
-Copy-Item -Path (Join-Path $srcDir 'public') -Destination (Join-Path $stagingDir 'public') -Recurse -Force
+Copy-Item -Path (Join-Path $srcDir '*') -Destination $stagingDir -Recurse -Force
 Copy-Item -Path $coreDll, $wfDll, $loaderDll -Destination $stagingDir -Force
 
 # 4. Payload ZIP Olustur (Optimal Sikistirma)
@@ -69,10 +75,13 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadHash = (Get-FileHash -Path $payloadZip -Algorithm SHA256).Hash.Substring(0, 12).ToLowerInvariant()
 $buildStamp = "v151-$payloadHash"
 
-# 5. C# Kaynak Koduna Build Stamp Yerlestir ve Tek EXE Olarak Derle
-$hostCsSrc = Get-Content -Path (Join-Path $PSScriptRoot 'LightDesktopHost.cs') -Raw -Encoding UTF8
-$genCsPath = Join-Path $toolsDir 'LightDesktopHost.gen.cs'
-$hostCsSrc.Replace('__BUILD_STAMP__', $buildStamp) | Set-Content -Path $genCsPath -Encoding UTF8
+# 5. C# Kaynak Koduna Build Stamp Yerlestir ve Tek EXE Olarak Derle (5S scripts/host/*.cs)
+$hostDir = Join-Path $PSScriptRoot 'host'
+$hostConfigSrc = Get-Content -Path (Join-Path $hostDir 'HostConfig.cs') -Raw -Encoding UTF8
+$genConfigPath = Join-Path $toolsDir 'HostConfig.gen.cs'
+$hostConfigSrc.Replace('__BUILD_STAMP__', $buildStamp) | Set-Content -Path $genConfigPath -Encoding UTF8
+
+$otherCsFiles = @(Get-ChildItem -Path $hostDir -Filter '*.cs' | Where-Object { $_.Name -ne 'HostConfig.cs' } | Select-Object -ExpandProperty FullName)
 
 $icoPath = Join-Path $srcDir 'public\favicon.ico'
 $tempOutExe = Join-Path $toolsDir 'LightDesktop.build.exe'
@@ -94,8 +103,8 @@ $cscArgs = @(
   ("/reference:" + $coreDll),
   ("/reference:" + $wfDll),
   ("/out:" + $tempOutExe),
-  $genCsPath
-)
+  $genConfigPath
+) + $otherCsFiles
 
 Write-Host "Tek dosya LightDesktop.exe derleniyor (Stamp: $buildStamp)..."
 & $cscPath @cscArgs
@@ -167,12 +176,52 @@ if ($runningHosts.Count -gt 0) {
   }
 }
 
+# Port 3847 veya LightDesktopRuntime uzerinden calisan eski LightDesktop node.exe sunucularini kapat
+try {
+  $health = Invoke-RestMethod -Uri 'http://127.0.0.1:3847/api/health' -TimeoutSec 2 -ErrorAction SilentlyContinue
+  if ($health -and $health.pid -and $health.serverDir -and ($health.serverDir -match 'LightDesktop')) {
+    Write-Host ("Port 3847 uzerindeki eski LightDesktop Node sunucusu kapatiliyor (PID=" + $health.pid + ")...")
+    Stop-Process -Id ([int]$health.pid) -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
+  }
+} catch {}
+try {
+  $rtPrefixAll = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'LightDesktopRuntime' } else { '' }
+  $staleNodes = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    ($rtPrefixAll -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith($rtPrefixAll, [System.StringComparison]::OrdinalIgnoreCase)) -or
+    ($_.CommandLine -and $_.CommandLine -match 'lightdesktop' -and $_.CommandLine -match 'server\.js')
+  })
+  if ($staleNodes.Count -gt 0) {
+    Write-Host ("Eski arka plan Node sunuculari kapatiliyor (" + $staleNodes.Count + " surec)...")
+    foreach ($sn in $staleNodes) {
+      Stop-Process -Id ([int]$sn.ProcessId) -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 300
+  }
+} catch {}
+
 Copy-Item -LiteralPath $tempOutExe -Destination $fullOutExe -Force
 Remove-Item -LiteralPath $tempOutExe -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath ($fullOutExe + '.old') -Force -ErrorAction SilentlyContinue
 
 if ($fullFixedExe -and (Test-Path -LiteralPath $fullFixedExe)) {
-  Copy-Item -LiteralPath $fullOutExe -Destination $fullFixedExe -Force
+  $copiedFixed = $false
+  for ($try = 0; $try -lt 12; $try++) {
+    try {
+      Copy-Item -LiteralPath $fullOutExe -Destination $fullFixedExe -Force -ErrorAction Stop
+      $copiedFixed = $true
+      break
+    } catch {
+      try { Get-Process -Name 'LightDesktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue } catch {}
+      Start-Sleep -Milliseconds 300
+    }
+  }
+  if (-not $copiedFixed) {
+    $oldFixed = $fullFixedExe + '.old'
+    try { Remove-Item -LiteralPath $oldFixed -Force -ErrorAction SilentlyContinue } catch {}
+    Move-Item -LiteralPath $fullFixedExe -Destination $oldFixed -Force -ErrorAction SilentlyContinue
+    Copy-Item -LiteralPath $fullOutExe -Destination $fullFixedExe -Force
+  }
   Remove-Item -LiteralPath ($fullFixedExe + '.old') -Force -ErrorAction SilentlyContinue
   Write-Host ("Sabit konum EXE guncellendi: " + $fullFixedExe)
 }

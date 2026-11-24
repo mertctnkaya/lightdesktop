@@ -1,0 +1,56 @@
+  <!-- Tarihe Göre Klasörleme Seçenekleri Modalı -->
+  <dialog id="organize-date-dialog" class="modal-dialog org-date-dialog" closedby="any" aria-labelledby="org-date-title">
+    <form method="dialog" id="org-date-form">
+      <h3 id="org-date-title">📅 Tarihe Göre Klasörle</h3>
+      <p id="org-date-summary" class="muted-text"></p>
+
+      <div class="org-section-label">1. İşlem Türü</div>
+      <div class="org-radio-grid">
+        <label class="org-radio-card">
+          <input type="radio" name="org-mode" value="copy" checked />
+          <div>
+            <strong>📋 Kopyalayarak klasörle</strong>
+            <div class="muted-text">Orijinal dosyalar olduğu yerde kalır, kopyaları ayrıştırılır</div>
+          </div>
+        </label>
+        <label class="org-radio-card">
+          <input type="radio" name="org-mode" value="move" />
+          <div>
+            <strong>📦 Taşıyarak klasörle</strong>
+            <div class="muted-text">Orijinal dosyalar mevcut konumdan ayrıştırılarak taşınır</div>
+          </div>
+        </label>
+      </div>
+
+      <div class="org-section-label">2. Hedef Konum</div>
+      <div class="org-radio-grid">
+        <label class="org-radio-card">
+          <input type="radio" name="org-dest-mode" value="current" checked />
+          <div>
+            <strong>📍 Buraya (Güncel Konuma)</strong>
+            <div id="org-current-path-label" class="muted-text org-path-sub"></div>
+          </div>
+        </label>
+        <label class="org-radio-card">
+          <input type="radio" name="org-dest-mode" value="custom" />
+          <div>
+            <strong>📂 Başka Konum Seç</strong>
+            <div class="muted-text">Bilgisayardan başka bir hedef klasör belirleyin</div>
+          </div>
+        </label>
+      </div>
+
+      <div id="org-custom-dest-row" class="org-dest-row hidden">
+        <input id="org-custom-dest-input" type="text" spellcheck="false" placeholder="Hedef ana klasör yolu (örn. D:\Arsiv)" />
+        <button type="button" id="btn-org-browse" class="cmd-btn">📂 Gözat...</button>
+        <button type="button" id="btn-org-use-dual" class="cmd-btn hidden">◫ Sağ Panel</button>
+      </div>
+
+      <div id="org-output-preview" class="org-preview-box"></div>
+
+      <div class="prompt-buttons">
+        <button type="button" id="btn-org-cancel" class="cmd-btn">İptal</button>
+        <button type="submit" id="btn-org-ok" class="cmd-btn primary">Klasörlemeyi Başlat</button>
+      </div>
+    </form>
+  </dialog>

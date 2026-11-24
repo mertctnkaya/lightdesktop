@@ -1,0 +1,35 @@
+  <!-- Dahili Koyu Temalı Klasör Seçici Modalı -->
+  <dialog id="folder-picker-dialog" class="modal-dialog fp-dialog" closedby="any" aria-labelledby="fp-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span class="props-icon">📂</span>
+        <div>
+          <strong id="fp-title">Klasör Seç</strong>
+          <div id="fp-subtitle" class="muted-text">Bir klasör seçin veya yolu yapıştırın</div>
+        </div>
+      </div>
+      <button type="button" id="btn-fp-close" class="icon-btn">✕</button>
+    </div>
+
+    <div class="fp-nav">
+      <button type="button" id="btn-fp-back" class="cmd-btn" title="Geri (Mouse 4 / Alt+Sol)" disabled>←</button>
+      <button type="button" id="btn-fp-forward" class="cmd-btn" title="İleri (Mouse 5 / Alt+Sağ)" disabled>→</button>
+      <button type="button" id="btn-fp-up" class="cmd-btn" title="Üst Klasöre Çık">↑</button>
+      <input type="text" id="fp-path-input" class="fp-path-input" spellcheck="false" placeholder="Örn: D:\Videolar" />
+      <button type="button" id="btn-fp-go" class="cmd-btn">Git</button>
+      <button type="button" id="btn-fp-mkdir" class="cmd-btn" title="Bu konumda yeni klasör oluştur">＋ Yeni Klasör</button>
+    </div>
+
+    <div class="fp-body">
+      <aside id="fp-sidebar" class="fp-sidebar"></aside>
+      <div id="fp-list" class="fp-list"></div>
+    </div>
+
+    <div class="props-footer">
+      <span id="fp-selected-preview" class="fp-selected-preview muted-text"></span>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <button type="button" id="btn-fp-cancel" class="cmd-btn">İptal</button>
+        <button type="button" id="btn-fp-select" class="cmd-btn primary">✓ Bu Klasörü Seç</button>
+      </div>
+    </div>
+  </dialog>

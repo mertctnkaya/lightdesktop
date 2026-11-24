@@ -1,0 +1,74 @@
+/* Gelişmiş Aralık Seçim Stüdyosu */
+.range-studio {
+  background: #212224;
+  border-bottom: 1px solid #3c3c3c;
+  padding: 10px 14px;
+}
+.studio-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.studio-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-left: auto;
+}
+.chip-btn {
+  background: #2c2d30;
+  border: 1px solid #404247;
+  border-radius: 99px;
+  padding: 2px 9px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.chip-btn:hover { background: #383a3f; border-color: var(--accent); }
+
+.studio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px 12px;
+}
+.studio-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.studio-field label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.inline-flex {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.inline-flex input[type="text"], .inline-flex input[type="date"], .inline-flex input[type="number"] {
+  flex: 1;
+  min-width: 0;
+}
+.chk-pill {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 4px;
+  color: var(--text) !important;
+  font-size: 11.5px !important;
+  white-space: nowrap;
+}
+
+.studio-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #333;
+}
+.studio-summary { font-size: 12px; color: #7cc4ff; font-weight: 600; }
+.studio-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+

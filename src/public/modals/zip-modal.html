@@ -1,0 +1,33 @@
+  <!-- Dahili ZIP Arşiv Yöneticisi Modalı -->
+  <dialog id="zip-dialog" class="modal-dialog zip-dialog" closedby="any" aria-labelledby="zip-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span class="props-icon">📦</span>
+        <div>
+          <strong id="zip-title">ZIP Arşivi</strong>
+          <div id="zip-subtitle" class="muted-text">İçerik yükleniyor...</div>
+        </div>
+      </div>
+      <button type="button" id="btn-zip-close" class="icon-btn">✕</button>
+    </div>
+
+    <div class="zip-toolbar">
+      <input type="search" id="zip-search-input" class="zip-search-input" spellcheck="false" placeholder="Arşiv içinde ara..." />
+      <label class="zip-select-all-lbl">
+        <input type="checkbox" id="chk-zip-select-all" />
+        Tümünü Seç
+      </label>
+      <div class="zip-toolbar-actions">
+        <button type="button" id="btn-zip-extract-selected" class="cmd-btn" disabled>📤 Seçilenleri Ayıkla (0)</button>
+        <button type="button" id="btn-zip-extract-here" class="cmd-btn" title="Arşivle aynı klasöre kendi adıyla ayıklar">📂 Buraya Ayıkla</button>
+        <button type="button" id="btn-zip-extract-to" class="cmd-btn primary">📁 Klasöre Ayıkla...</button>
+      </div>
+    </div>
+
+    <div id="zip-entries-list" class="zip-entries-list"></div>
+
+    <div class="props-footer">
+      <span id="zip-footer-info" class="muted-text" style="font-size:11.5px;"></span>
+      <button type="button" id="btn-zip-done" class="cmd-btn primary">✓ Kapat</button>
+    </div>
+  </dialog>

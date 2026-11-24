@@ -1,0 +1,74 @@
+  <!-- Space QuickLook Önizleme Modalı -->
+  <dialog id="quicklook-dialog" class="modal-dialog quicklook-dialog" closedby="any" aria-labelledby="ql-filename">
+    <div class="ql-header">
+      <div class="ql-title">
+        <strong id="ql-filename">Dosya</strong>
+        <span id="ql-meta" class="muted-text"></span>
+      </div>
+      <div class="ql-controls">
+        <button id="btn-ql-basket" class="cmd-btn" title="Sepete Ekle ve Sonrakine Geç (B)">🧺 Sepete (B)</button>
+        <button id="btn-ql-delete" class="cmd-btn danger-hover" title="Çöpe At ve Sonrakine Geç (Del)">🗑️ Sil (Del)</button>
+        <div class="cmd-sep"></div>
+        <button id="btn-ql-zoom-out" class="cmd-btn" title="Uzaklaştır (-)">🔍−</button>
+        <button id="btn-ql-zoom-reset" class="cmd-btn" title="Yakınlaştırmayı Sıfırla (0)">100%</button>
+        <button id="btn-ql-zoom-in" class="cmd-btn" title="Yakınlaştır (+)">🔍+</button>
+        <div class="cmd-sep"></div>
+        <div class="ql-bright-wrap" title="Parlaklık (%30 – %200)">
+          <span>☀️</span>
+          <input type="range" id="ql-brightness-range" min="30" max="200" step="5" value="100" aria-label="Parlaklık" />
+          <button type="button" id="btn-ql-bright-reset" class="cmd-btn" title="Parlaklığı Sıfırla (%100)">100%</button>
+        </div>
+        <div class="cmd-sep"></div>
+        <button id="btn-ql-prev" class="cmd-btn">◀ Önceki</button>
+        <button id="btn-ql-next" class="cmd-btn">Sonraki ▶</button>
+        <button id="btn-ql-frame-prev" class="cmd-btn hidden" title="Önceki Kare (,) • Shift: 5 kare geri">⏮ Kare</button>
+        <button id="btn-ql-frame-next" class="cmd-btn hidden" title="Sonraki Kare (.) • Shift: 5 kare ileri">Kare ⏭</button>
+        <button id="btn-ql-capture" class="cmd-btn hidden" title="O anki video karesini görüntü olarak kaydet (S)">📸 Kare Al (S)</button>
+        <button id="btn-ql-trim-toggle" class="cmd-btn hidden" title="FFmpeg ile kayıpsız A-B video kırpma">✂️ Kırp</button>
+        <button id="btn-ql-related" class="cmd-btn" title="Bu dosya ile aynı gün/saat veya benzer isimli tüm dosyaları bul">✨ Benzerlerini Bul</button>
+        <button id="btn-ql-reveal" class="cmd-btn" title="Dosyanın Bulunduğu Klasörü Aç">📂 Bulunduğu Yeri Aç</button>
+        <button id="btn-ql-open-ext" class="cmd-btn primary">Varsayılan Uygulamada Aç</button>
+        <button id="btn-ql-close" class="icon-btn">✕</button>
+      </div>
+    </div>
+    <div class="ql-stage-wrap">
+      <button type="button" id="btn-ql-stage-prev" class="ql-nav-btn prev" title="Önceki (←)" aria-label="Önceki">‹</button>
+      <div id="ql-stage" class="ql-stage"></div>
+      <div id="ql-basket-badge" class="ql-basket-badge hidden" title="Bu öğe sepette">🧺 <span class="basket-check">✓</span> Sepette</div>
+      <button type="button" id="btn-ql-stage-next" class="ql-nav-btn next" title="Sonraki (→)" aria-label="Sonraki">›</button>
+    </div>
+    <div id="ql-trim-bar" class="ql-trim-bar hidden">
+      <div class="ql-trim-timeline-wrap">
+        <span id="ql-trim-time-min" class="ql-trim-edge-time">00:00</span>
+        <div id="ql-trim-track" class="ql-trim-track" title="Videoda konuma gitmek için tıklayın; A/B tutamaçlarını sürükleyin">
+          <div id="ql-trim-selection" class="ql-trim-selection"></div>
+          <div id="ql-trim-playhead" class="ql-trim-playhead"></div>
+          <div id="ql-trim-handle-a" class="ql-trim-handle handle-a" title="Başlangıç (A) sürükle">A</div>
+          <div id="ql-trim-handle-b" class="ql-trim-handle handle-b" title="Bitiş (B) sürükle">B</div>
+        </div>
+        <span id="ql-trim-time-max" class="ql-trim-edge-time">00:00</span>
+      </div>
+      <div class="ql-trim-controls-row">
+        <div class="ql-trim-pill-group">
+          <div class="ql-trim-chip">
+            <span class="trim-tag tag-a">A</span>
+            <span id="ql-trim-start-fmt" class="trim-time-code">00:00.0</span>
+            <input type="number" id="ql-trim-start" step="0.1" min="0" value="0" title="Başlangıç saniyesi" />
+            <button type="button" id="btn-ql-set-start" class="ql-trim-btn" title="Videonun şu anki saniyesini A yap">⏱ Şu Anı A Yap</button>
+          </div>
+          <div class="ql-trim-chip">
+            <span class="trim-tag tag-b">B</span>
+            <span id="ql-trim-end-fmt" class="trim-time-code">00:00.0</span>
+            <input type="number" id="ql-trim-end" step="0.1" min="0" value="0" title="Bitiş saniyesi" />
+            <button type="button" id="btn-ql-set-end" class="ql-trim-btn" title="Videonun şu anki saniyesini B yap">⏱ Şu Anı B Yap</button>
+          </div>
+        </div>
+        <div class="ql-trim-actions-group">
+          <span id="ql-trim-duration" class="ql-trim-dur-badge">Seçili: —</span>
+          <button type="button" id="btn-ql-trim-preview" class="ql-trim-btn" title="Seçili A–B aralığını oynat">▶ Seçimi Oynat</button>
+          <button type="button" id="btn-ql-trim-run" class="cmd-btn primary">✂️ Kayıpsız Kırp &amp; Kaydet</button>
+          <button type="button" id="btn-ql-trim-close" class="icon-btn small" title="Kırpma Çubuğunu Kapat">✕</button>
+        </div>
+      </div>
+    </div>
+  </dialog>

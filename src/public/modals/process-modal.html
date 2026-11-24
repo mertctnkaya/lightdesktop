@@ -1,0 +1,78 @@
+  <!-- Windows Tarzı İşlem İlerleme Penceresi -->
+  <div id="process-modal" class="process-modal-overlay hidden" role="dialog" aria-labelledby="proc-title">
+    <div class="process-modal">
+      <div class="proc-header">
+        <div class="proc-title-wrap">
+          <span id="proc-op-icon" class="proc-op-icon">⚙️</span>
+          <strong id="proc-title">İşlem Yürütülüyor</strong>
+        </div>
+        <div class="proc-header-btns">
+          <button id="btn-proc-minimize" class="cmd-btn small" title="Arka Plana Al">🗕 Arka Plana Al</button>
+          <button id="btn-proc-close" class="icon-btn small" title="Kapat / Arka Plana Al">✕</button>
+        </div>
+      </div>
+
+      <div class="proc-body">
+        <div class="proc-top-stats">
+          <span id="proc-pct" class="proc-pct">%0</span>
+          <span id="proc-rate-eta" class="proc-rate-eta">Hazırlanıyor...</span>
+        </div>
+
+        <div class="proc-bar-track">
+          <div id="proc-bar-fill" class="proc-bar-fill"></div>
+        </div>
+
+        <div class="proc-summary">
+          <div class="proc-summary-row">
+            <span class="proc-lbl">İlerleme:</span>
+            <span id="proc-count" class="proc-val">0 / 0</span>
+            <span id="proc-err-inline" class="proc-err-inline hidden"></span>
+          </div>
+          <div class="proc-summary-row">
+            <span class="proc-lbl">İşlenen:</span>
+            <span id="proc-current" class="proc-val">—</span>
+          </div>
+          <div class="proc-summary-row">
+            <span class="proc-lbl">Konum:</span>
+            <span id="proc-target" class="proc-val muted-text">—</span>
+          </div>
+        </div>
+
+        <div class="proc-actions-row">
+          <button id="btn-proc-details" class="cmd-btn">⌄ Ayrıntılı Liste</button>
+          <div class="proc-actions-right">
+            <button id="btn-proc-open-errors" class="cmd-btn danger-hover hidden">⚠️ Hatalara Bak</button>
+            <button id="btn-proc-pause" class="cmd-btn">⏸ Duraklat</button>
+            <button id="btn-proc-cancel" class="cmd-btn danger-hover">⏹ İptal Et</button>
+            <button id="btn-proc-done" class="cmd-btn primary hidden">✓ Tamam</button>
+          </div>
+        </div>
+
+        <div id="proc-details-box" class="proc-details-box hidden">
+          <div id="proc-queue-summary" class="proc-queue-summary hidden"></div>
+          <div class="proc-log-head">Son İşlenen Dosyalar (Canlı Akış)</div>
+          <div id="proc-log-list" class="proc-log-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Arka Plan İşlem Dock Kartı (Arka Plana Alınınca Sağ Altta Görünür) -->
+  <div id="process-dock" class="process-dock hidden">
+    <div class="dock-head">
+      <div class="dock-title-wrap">
+        <span id="dock-icon">⚙️</span>
+        <strong id="dock-title">İşlem sürüyor...</strong>
+      </div>
+      <div class="dock-btns">
+        <button id="btn-dock-pause" class="mini-pill-btn" title="Duraklat / Devam Et">⏸</button>
+        <button id="btn-dock-cancel" class="mini-pill-btn danger" title="İptal Et">✕</button>
+        <button id="btn-dock-expand" class="mini-pill-btn" title="Ayrıntılı Pencereyi Aç">🗖 Detay</button>
+      </div>
+    </div>
+    <div class="dock-bar-track"><div id="dock-bar-fill" class="dock-bar-fill"></div></div>
+    <div class="dock-meta">
+      <span id="dock-current" class="dock-current">—</span>
+      <span id="dock-stats" class="dock-stats">0%</span>
+    </div>
+  </div>

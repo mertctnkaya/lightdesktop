@@ -1,0 +1,281 @@
+  <!-- Uygulama Ayarları Modalı -->
+  <dialog id="settings-dialog" class="modal-dialog settings-dialog" closedby="any" aria-labelledby="settings-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span class="props-icon">⚙️</span>
+        <div>
+          <strong id="settings-title">Uygulama Ayarları</strong>
+          <div class="muted-text">Tüm değişiklikler anında uygulanır ve tarayıcı belleğine kaydedilir.</div>
+        </div>
+      </div>
+      <button type="button" id="btn-settings-close" class="icon-btn">✕</button>
+    </div>
+
+    <div class="settings-body settings-body-grid">
+      <div class="settings-group">
+        <div class="settings-group-title">🎨 Görünüm &amp; Tema</div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Vurgu Rengi</strong>
+            <span class="muted-text">Seçim çerçevesi, aktif butonlar ve ilerleme çubuğu rengi</span>
+          </div>
+          <div id="set-accent-swatches" class="color-swatches">
+            <button type="button" class="color-swatch" data-color="#0078d4" style="background:#0078d4" title="Windows Mavi"></button>
+            <button type="button" class="color-swatch" data-color="#10893e" style="background:#10893e" title="Zümrüt Yeşili"></button>
+            <button type="button" class="color-swatch" data-color="#8764b8" style="background:#8764b8" title="Mor"></button>
+            <button type="button" class="color-swatch" data-color="#ca5010" style="background:#ca5010" title="Kehribar"></button>
+            <button type="button" class="color-swatch" data-color="#00b7c3" style="background:#00b7c3" title="Camgöbeği"></button>
+            <button type="button" class="color-swatch" data-color="#e3008c" style="background:#e3008c" title="Mercan"></button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Yazı Boyutu</strong>
+            <span class="muted-text">Arayüz genel metin boyutu</span>
+          </div>
+          <select id="set-font-size">
+            <option value="12">Küçük (12 px)</option>
+            <option value="13">Varsayılan (13 px)</option>
+            <option value="14">Büyük (14 px)</option>
+            <option value="15">Çok Büyük (15 px)</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Varsayılan Klasör Görünümü</strong>
+            <span class="muted-text">Özel görünümü kaydedilmemiş klasörlerde kullanılacak görünüm</span>
+          </div>
+          <select id="set-default-view">
+            <option value="last">Son kullanılan görünüm</option>
+            <option value="list">☰ Detaylı Liste</option>
+            <option value="dense">≡ Sıkışık Liste</option>
+            <option value="compact">☷ Kompakt Liste</option>
+            <option value="tiles">▤ Döşemeler (Tiles)</option>
+            <option value="grid-sm">⊞ Küçük Kapaklar</option>
+            <option value="grid">⊞ Orta Kapaklar</option>
+            <option value="grid-lg">⊞ Büyük Kapaklar</option>
+            <option value="grid-xl">🖼️ Çok Büyük Galeri</option>
+          </select>
+        </div>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Klasöre özel görünüm modunu hatırla</strong>
+            <span class="muted-text">Her klasörde seçtiğiniz liste/galeri görünümünü o klasöre özel kaydeder</span>
+          </div>
+          <input type="checkbox" id="set-remember-folder-view" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Klasörleri her zaman en üstte sırala</strong>
+            <span class="muted-text">Kapalıysa klasörler ve dosyalar seçili sıraya göre karışık listelenir</span>
+          </div>
+          <input type="checkbox" id="set-folders-first" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Dosya uzantılarını göster (.jpg, .mp4, .txt)</strong>
+            <span class="muted-text">Kapatıldığında listede yalnızca dosya adı görünür</span>
+          </div>
+          <input type="checkbox" id="set-show-ext" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Kompakt (sıkışık) sol menü</strong>
+            <span class="muted-text">Sol gezinti panelindeki satır boşluklarını daraltır</span>
+          </div>
+          <input type="checkbox" id="set-compact-sidebar" />
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">📂 Yollar &amp; Kayıt Konumları</div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Açılışta Başlangıç Konumu</strong>
+            <span class="muted-text">Yeni pencerede ilk açılacak yer</span>
+          </div>
+          <select id="set-startup-mode">
+            <option value="pc">🖥️ Bu bilgisayar</option>
+            <option value="last">🕒 Son kaldığım klasör</option>
+            <option value="custom">📂 Özel klasör yolu</option>
+          </select>
+        </div>
+        <div id="set-startup-custom-row" class="settings-row settings-path-row hidden">
+          <div class="settings-label-wrap">
+            <strong>Özel Başlangıç Yolu</strong>
+            <span class="muted-text">Örn: D:\Videolar veya C:\Users\mrtcn\Desktop</span>
+          </div>
+          <div class="settings-path-input-wrap">
+            <input type="text" id="set-startup-path" spellcheck="false" placeholder="D:\" />
+            <button type="button" id="btn-set-startup-browse" class="cmd-btn">📂 Gözat...</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Video Kare Yakalama (📸 Kare Al) Konumu</strong>
+            <span class="muted-text">Videodan alınan kare fotoğrafın kaydedileceği yer</span>
+          </div>
+          <select id="set-frame-save-mode">
+            <option value="same">📂 Videonun bulunduğu klasöre kaydet</option>
+            <option value="custom">📁 Özel klasör seç...</option>
+          </select>
+        </div>
+        <div id="set-frame-save-custom-row" class="settings-row settings-path-row hidden">
+          <div class="settings-label-wrap">
+            <strong>Kare Fotoğraf Kayıt Klasörü</strong>
+            <span class="muted-text">Örn: C:\Users\mrtcn\Pictures\YakalananKareler</span>
+          </div>
+          <div class="settings-path-input-wrap">
+            <input type="text" id="set-frame-save-dir" spellcheck="false" placeholder="Klasör yolu..." />
+            <button type="button" id="btn-set-frame-save-browse" class="cmd-btn">📂 Gözat...</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Video Kırpma (✂️ Kırp) Kayıt Konumu</strong>
+            <span class="muted-text">Kırpılan videoların varsayılan kaydedileceği yer</span>
+          </div>
+          <select id="set-trim-save-mode">
+            <option value="same">📂 Videonun bulunduğu klasöre kaydet</option>
+            <option value="custom">📁 Özel klasör seç...</option>
+          </select>
+        </div>
+        <div id="set-trim-save-custom-row" class="settings-row settings-path-row hidden">
+          <div class="settings-label-wrap">
+            <strong>Kırpılan Video Kayıt Klasörü</strong>
+            <span class="muted-text">Örn: C:\Users\mrtcn\Videos\Kirpilanlar</span>
+          </div>
+          <div class="settings-path-input-wrap">
+            <input type="text" id="set-trim-save-dir" spellcheck="false" placeholder="Klasör yolu..." />
+            <button type="button" id="btn-set-trim-save-browse" class="cmd-btn">📂 Gözat...</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">🎬 Medya, Önizleme &amp; HDD Koruması</div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Varsayılan Kapak Resmi (Thumbnail) Modu</strong>
+            <span class="muted-text">HDD sağlığı için açılışta seçilecek kapak yükleme modu</span>
+          </div>
+          <select id="set-default-thumb">
+            <option value="off">Kapalı (0 Yük)</option>
+            <option value="selected">Sadece Seçililer</option>
+            <option value="viewport">Ekrandakiler (Sıralı)</option>
+            <option value="all">Tüm Klasör (Sıralı)</option>
+          </select>
+        </div>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Fotoğraf, GIF ve videolara çift tıklayınca dahili oynatıcıda aç</strong>
+            <span class="muted-text">Kapalıysa doğrudan Windows varsayılan uygulaması açılır</span>
+          </div>
+          <input type="checkbox" id="set-dblclick-quicklook" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>QuickLook'ta videoları otomatik oynat</strong>
+            <span class="muted-text">Space veya çift tıkla açılan video hemen başlar</span>
+          </div>
+          <input type="checkbox" id="set-video-autoplay" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>QuickLook'ta videoları döngüye al (Loop)</strong>
+            <span class="muted-text">Kısa videolar bitince otomatik başa sarar</span>
+          </div>
+          <input type="checkbox" id="set-video-loop" />
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">⚡ Davranış &amp; Gezinti</div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Öğe Açma Modu</strong>
+            <span class="muted-text">Dosya ve klasörlere tıklama davranışı</span>
+          </div>
+          <select id="set-click-mode">
+            <option value="double">Çift Tıkla Aç (Varsayılan)</option>
+            <option value="single">Tek Tıkla Aç</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Çöp Kutusuna Taşıma Onayı</strong>
+            <span class="muted-text">Normal Del tuşuyla çöpe atarken ne zaman onay istensin?</span>
+          </div>
+          <select id="set-trash-confirm">
+            <option value="bulk">Sadece &gt;50 öğede sor (Hızlı)</option>
+            <option value="always">Her zaman onay sor</option>
+            <option value="never">Hiç sorma (Anında çöpe at)</option>
+          </select>
+        </div>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Hatasız biten transfer penceresini otomatik kapat</strong>
+            <span class="muted-text">Taşıma / kopyalama %100 tamamlanınca pencere kendiliğinden kapanır</span>
+          </div>
+          <input type="checkbox" id="set-auto-close-proc" />
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">🪟 Windows Entegrasyonu &amp; Hızlı Erişim</div>
+        <div id="int-status-banner" class="settings-cache-box">Sistem entegrasyon durumu kontrol ediliyor...</div>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Varsayılan Klasör Gezgini Yap</strong>
+            <span class="muted-text">Windows'ta bir klasör açıldığında LightDesktop açılır (Denetim Masası/Ağ Windows Gezgini'ne bırakılır)</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <button type="button" id="btn-int-restore-explorer" class="cmd-btn hidden">↩️ Gezgine Dön</button>
+            <input type="checkbox" id="set-int-default-explorer" />
+          </div>
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Windows Açılışında Arka Planda Hazır Bekle</strong>
+            <span class="muted-text">Sistem tepsisinde bekler; klasörleri ve Ctrl+Alt+E kısayolunu anında açar</span>
+          </div>
+          <input type="checkbox" id="set-int-autostart" />
+        </label>
+        <div class="settings-actions-grid">
+          <button type="button" id="btn-int-shortcuts" class="cmd-btn">📌 Masaüstü, Başlat Menüsü (Ctrl+Alt+E) &amp; Sağ Tık</button>
+          <button type="button" id="btn-int-install-fixed" class="cmd-btn hidden">💾 Sabit Konuma Kur (%LOCALAPPDATA%\LightDesktop)</button>
+          <button type="button" id="btn-int-open-welcome" class="cmd-btn">✨ Hızlı Kurulum Sihirbazını Aç</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">🛡️ Önbellek, Kısayol &amp; Bakım</div>
+        <div id="settings-cache-stats" class="settings-cache-box">Yükleniyor...</div>
+        <div class="settings-actions-grid">
+          <button type="button" id="btn-set-clear-thumbs" class="cmd-btn">🖼️ Kapak Önbelleğini Temizle</button>
+          <button type="button" id="btn-set-clear-recents" class="cmd-btn">🧹 Son Klasör &amp; Dosya Geçmişini Sil</button>
+          <button type="button" id="btn-set-clear-folder-views" class="cmd-btn">📂 Klasör Görünümlerini Sıfırla</button>
+          <button type="button" id="btn-set-reset-col-widths" class="cmd-btn">↔️ Sütun Genişliklerini Sıfırla</button>
+          <button type="button" id="btn-set-update-shortcut" class="cmd-btn">📌 Masaüstü Kısayolunu &amp; İkonu Kur</button>
+          <button type="button" id="btn-set-reset-defaults" class="cmd-btn danger-hover">🔄 Ayarları Varsayılana Sıfırla</button>
+        </div>
+
+        <div class="vault-settings-box">
+          <div class="vault-settings-head">
+            <strong>🔐 Gizli 30 Günlük Koruma Kasası</strong>
+            <span class="muted-text">Bu listedeki klasörlerden kalıcı silinenler (Shift+Del / Çöpten silme) silinmiş görünür ama 30 gün gizli saklanır.</span>
+          </div>
+          <div id="vault-protected-list" class="vault-protected-list"></div>
+          <div class="vault-settings-actions">
+            <button type="button" id="btn-vault-add-path" class="cmd-btn">➕ Korunan Klasör Ekle...</button>
+            <button type="button" id="btn-open-vault-modal" class="cmd-btn">🔐 30 Günlük Kasayı Aç</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="props-footer">
+      <span class="muted-text" style="font-size:11.5px;">Kısayol: <code>Ctrl + ,</code></span>
+      <button type="button" id="btn-settings-done" class="cmd-btn primary">✓ Tamam</button>
+    </div>
+  </dialog>

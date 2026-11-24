@@ -1,0 +1,28 @@
+  <!-- Gizli 30 Günlük Koruma Kasası Modalı (Yalnızca Ayarlardan Erişilir) -->
+  <dialog id="vault-dialog" class="modal-dialog vault-dialog" closedby="any" aria-labelledby="vault-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span class="props-icon">🔐</span>
+        <div>
+          <strong id="vault-title">Gizli 30 Günlük Koruma Kasası</strong>
+          <div id="vault-modal-subtitle" class="muted-text">Yükleniyor...</div>
+        </div>
+      </div>
+      <button type="button" id="btn-vault-close" class="icon-btn">✕</button>
+    </div>
+
+    <div class="vault-toolbar">
+      <span class="muted-text" style="font-size:11.5px;">Korunan klasörlerden kalıcı silinen (veya çöpten silinen) öğeler burada 30 gün gizli tutulur.</span>
+      <div class="vault-toolbar-actions">
+        <button type="button" id="btn-vault-restore-all" class="cmd-btn">↩️ Tümünü Geri Yükle</button>
+        <button type="button" id="btn-vault-purge-all" class="cmd-btn danger-hover">🔥 Kasayı Boşalt</button>
+      </div>
+    </div>
+
+    <div id="vault-items-list" class="vault-items-list"></div>
+
+    <div class="props-footer">
+      <span class="muted-text" style="font-size:11.5px;">30 günü dolan öğeler açılışta otomatik olarak kalıcı silinir.</span>
+      <button type="button" id="btn-vault-done" class="cmd-btn primary">✓ Kapat</button>
+    </div>
+  </dialog>
