@@ -355,9 +355,16 @@ function renderBreadcrumbs(p) {
 }
 
 
+const NO_DBLCLICK_QUICKLOOK_EXTS = new Set([
+  '.bat', '.cmd', '.exe', '.msi', '.com', '.lnk', '.url',
+  '.vbs', '.vbe', '.wsf', '.wsh', '.hta', '.reg', '.scr', '.pif', '.msc', '.cpl',
+]);
+
 function shouldOpenInQuickLook(item) {
   if (!item || item.isDir) return false;
   if (state.settings.dblClickQuickLook === false) return false;
+  const ext = (item.ext || '').toLowerCase();
+  if (item.category === 'app' || NO_DBLCLICK_QUICKLOOK_EXTS.has(ext)) return false;
   return item.category === 'image' || item.category === 'video' || isPdfPreviewable(item) || isTextPreviewable(item);
 }
 
