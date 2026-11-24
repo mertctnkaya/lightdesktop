@@ -1,0 +1,84 @@
+  <!-- Klasör Değişim İzleme & Sıkıştırılabilir Aktivite Log Modalı -->
+  <dialog id="activity-log-dialog" class="modal-dialog activity-log-dialog" closedby="any" aria-labelledby="activity-log-title">
+    <div class="props-head">
+      <div class="props-head-title">
+        <span class="props-icon">📝</span>
+        <div>
+          <strong id="activity-log-title">Klasör Değişim İzleyici &amp; Aktivite Logları</strong>
+          <div id="act-live-status" class="muted-text">Hazırlanıyor...</div>
+        </div>
+      </div>
+      <div class="act-head-actions">
+        <span id="act-disk-badge" class="act-disk-badge">0 KB</span>
+        <button type="button" id="btn-act-toggle-global" class="cmd-btn">⏸️ Duraklat</button>
+        <button type="button" id="btn-close-activity-modal" class="icon-btn">✕</button>
+      </div>
+    </div>
+
+    <div class="act-tabs">
+      <button type="button" id="btn-act-tab-logs" class="act-tab-btn active">📋 Log Kayıtları</button>
+      <button type="button" id="btn-act-tab-watches" class="act-tab-btn">👁️ İzlenen Yollar &amp; Ayarlar</button>
+    </div>
+
+    <div id="act-panel-logs" class="act-panel">
+      <div class="act-filter-bar">
+        <input id="act-search" class="act-search-input" type="search" placeholder="Dosya adı, yol, uzantı veya metadata ara..." spellcheck="false" />
+        <div class="act-event-pills">
+          <button type="button" class="act-ev-pill active" data-act-event="ALL">Tümü</button>
+          <button type="button" class="act-ev-pill" data-act-event="CREATED">Oluşan</button>
+          <button type="button" class="act-ev-pill" data-act-event="MODIFIED">Düzenlenen</button>
+          <button type="button" class="act-ev-pill" data-act-event="DELETED">Silinen</button>
+          <button type="button" class="act-ev-pill" data-act-event="RENAMED">Ad Değişen</button>
+        </div>
+        <select id="act-filter-root" class="cmd-select" title="İzlenen Yola Göre Filtrele">
+          <option value="">Tüm İzlenen Yollar</option>
+        </select>
+        <select id="act-filter-file" class="cmd-select" title="Log Dosyası (.txt / .txt.gz)">
+          <option value="">Tüm Log Dosyaları</option>
+        </select>
+        <button type="button" id="btn-act-refresh" class="cmd-btn" title="Logları Yenile">↻ Yenile</button>
+      </div>
+
+      <div id="act-col-toggles" class="act-col-toggles"></div>
+
+      <div id="act-logs-list" class="act-logs-list"></div>
+
+      <div class="act-panel-footer">
+        <span id="act-logs-count" class="muted-text" style="font-size:11.5px;">0 kayıt</span>
+        <div class="act-footer-btns">
+          <button type="button" id="btn-act-compress" class="cmd-btn" title="Aktif .txt logları Gzip (.txt.gz) olarak sıkıştır">🗜️ Sıkıştır (.gz)</button>
+          <button type="button" id="btn-act-open-dir" class="cmd-btn" title="Logların tutulduğu klasörü LightDesktop'ta aç">📂 Log Klasörü</button>
+          <button type="button" id="btn-act-clear" class="cmd-btn danger-hover" title="Log dosyalarını temizle">🗑️ Temizle</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="act-panel-watches" class="act-panel hidden">
+      <div class="act-watch-toolbar">
+        <div class="act-watch-toolbar-btns">
+          <button type="button" id="btn-act-add-watch" class="cmd-btn primary">➕ İzlenecek Klasör Ekle...</button>
+          <button type="button" id="btn-act-add-current" class="cmd-btn">📂 Açık Klasörü İzle</button>
+        </div>
+        <span class="muted-text" style="font-size:11.5px;">Her yol için alt klasörlerin izlenmesini ayrı ayrı açıp kapatabilirsiniz.</span>
+      </div>
+
+      <div id="act-watches-list" class="act-watches-list"></div>
+
+      <div class="act-global-opts">
+        <label class="act-opt-check">
+          <input type="checkbox" id="act-opt-noise" />
+          <span>Geçici/gürültü dosyalarını yoksay (<code>.tmp</code>, <code>~$</code>, <code>node_modules</code>, <code>LightDesktopCache</code>)</span>
+        </label>
+        <div class="act-opt-nums">
+          <label>Oto-sıkıştırma eşiği (KB): <input type="number" id="act-opt-maxkb" min="64" max="10240" step="64" class="act-num-input" /></label>
+          <label>Saklama süresi (Gün): <input type="number" id="act-opt-retention" min="1" max="365" step="1" class="act-num-input" /></label>
+          <button type="button" id="btn-act-save-opts" class="cmd-btn">💾 Ayarları Kaydet</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="props-footer">
+      <span class="muted-text" style="font-size:11.5px;">Düşük yük • Anlık <code>.txt</code> log + otomatik <code>.txt.gz</code> sıkıştırma</span>
+      <button type="button" id="btn-act-done" class="cmd-btn primary">✓ Kapat</button>
+    </div>
+  </dialog>

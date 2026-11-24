@@ -27,6 +27,8 @@ import { hydrateInitData } from '../main.js';
 import { captureQuickLookFrame, getTrimVideoDuration, runQuickLookTrim, stepQuickLookVideoFrame, toggleQuickLookTrimBar, updateTrimDurationUi, updateTrimPlayheadUi, updateTrimPreviewBtnUi } from '../components/quicklook/quicklookVideoTools.js';
 import { saveActiveQuickLookText } from '../components/quicklook/quicklookTextTools.js';
 import { compressPathsToZip, extractZipQuickHere, extractZipToPicker, openZipManagerModal } from '../components/operations/zipManagerModal.js';
+import { createCustomShortcutInDir, createShortcutsInDir, createShortcutsToPicker } from '../components/operations/shortcutCreator.js';
+import { quickWatchFolder } from '../components/settings/activityLogModal.js';
 import { openCommandPalette } from '../components/palette/commandPalette.js';
 import { toggleDragShelfVisible } from '../components/sidebar/dragShelf.js';
 
@@ -995,6 +997,27 @@ function bindEvents() {
         ? { label: '📁 Klasöre Ayıkla...', onClick: () => extractZipToPicker(first.path) }
         : null,
       { label: multi ? `🗜️ ZIP Olarak Sıkıştır (${sel.length} öğe)...` : '🗜️ ZIP Olarak Sıkıştır...', onClick: () => compressPathsToZip(sel.map((s) => s.path), getActiveTab()?.path || '') },
+      {
+        label: '🔗 Kısayol Oluştur (.lnk)',
+        shortcut: '▸',
+        keepOpen: true,
+        onClick: (ev) => {
+          showCustomContextMenu(ev, [
+            {
+              label: '← Ana Menüye Dön',
+              keepOpen: true,
+              onClick: (ev2) => showCustomContextMenu(ev2, buildExplorerItemMenu(sel)),
+            },
+            { sep: true },
+            { label: '📁 Bu Klasörde Oluştur', onClick: () => createShortcutsInDir(sel, getActiveTab()?.path || '') },
+            { label: '🖥️ Masaüstüne Gönder', onClick: () => createShortcutsInDir(sel, 'DESKTOP') },
+            { label: '📂 Klasör Seçerek Oluştur...', onClick: () => createShortcutsToPicker(sel) },
+          ]);
+        },
+      },
+      !multi && first.isDir
+        ? { label: '👁️ Bu Klasörü İzle (Logla)', onClick: () => quickWatchFolder(first.path) }
+        : null,
       { label: multi ? '🔢 Toplu Adlandır' : '✏️ Yeniden Adlandır', shortcut: multi ? '' : 'F2', onClick: () => (multi ? batchRenameSelected(sel) : renameSelected()) },
       { sep: true },
       { label: '🗑️ Çöpe At', shortcut: 'Del', danger: true, onClick: () => deleteSelected(false) },
@@ -1025,6 +1048,7 @@ function bindEvents() {
       state.basket.size > 0 ? { label: `🧺 Sepettekileri Buraya Taşı (${state.basket.size})`, bold: true, onClick: () => transferBasketTo(tab.path, 'move') } : null,
       state.basket.size > 0 ? { label: `🧺 Sepettekileri Buraya Kopyala (${state.basket.size})`, onClick: () => transferBasketTo(tab.path, 'copy') } : null,
       { label: '📁 Yeni Klasör', shortcut: 'Ctrl+Shift+N', onClick: () => createNewFolder() },
+      { label: '🔗 Yeni Kısayol Oluştur (.lnk)...', onClick: () => createCustomShortcutInDir(tab.path) },
       { sep: true },
       { label: '✅ Tümünü Seç', shortcut: 'Ctrl+A', disabled: state.viewItems.length === 0, onClick: () => { for (const it of state.viewItems) state.selectedPaths.add(it.path); renderVirtualList(); updateStatusCounts(); updateToolbarButtons(); } },
       { label: '↩️ Geri Al', shortcut: 'Ctrl+Z', disabled: !state.undoSummary?.canUndo, onClick: () => performUndo() },
@@ -1033,6 +1057,7 @@ function bindEvents() {
       { label: '📂 Bulunduğu Yeri Aç (Gezgin)', onClick: () => revealInExplorer(tab.path) },
       { label: '🔗 Klasör Yolunu Kopyala', onClick: () => { navigator.clipboard.writeText(tab.path); toast('Klasör yolu kopyalandı'); } },
       { label: '📌 Sol Menüye Sabitle', onClick: () => togglePin(tab.path, getFolderTitle(tab.path), false) },
+      { label: '👁️ Bu Klasörü İzle (Logla)', onClick: () => quickWatchFolder(tab.path) },
       { label: '📊 Bu Klasörü Analiz Et', onClick: () => openAnalyzer(tab.path) },
       { label: 'ℹ️ Klasör Bilgisi / Özellikler', shortcut: 'Alt+Enter', onClick: () => showPropertiesModal([tab.path]) },
     ];
@@ -1041,7 +1066,7 @@ function bindEvents() {
   document.addEventListener('contextmenu', (e) => {
     const tag = e.target && e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    if (e.target && e.target.closest('.errors-logs-tail, .errors-list, .diag-env-bar, .proc-log-list, .props-val-copy, #errors-dialog, #properties-dialog, #settings-dialog, #vault-dialog, #folder-picker-dialog, #zip-dialog, #ql-text-editor')) {
+    if (e.target && e.target.closest('.errors-logs-tail, .errors-list, .diag-env-bar, .proc-log-list, .props-val-copy, #errors-dialog, #properties-dialog, #settings-dialog, #vault-dialog, #activity-log-dialog, #folder-picker-dialog, #zip-dialog, #ql-text-editor')) {
       return;
     }
     e.preventDefault();
@@ -1126,6 +1151,8 @@ function bindEvents() {
           { label: `✂️ Kes${countTag}`, shortcut: 'Ctrl+X', onClick: () => setClipboard('cut', dualSelPaths) },
           { label: `📋 Kopyala${countTag}`, shortcut: 'Ctrl+C', onClick: () => setClipboard('copy', dualSelPaths) },
           { label: multiCount > 1 ? `✏️ Toplu Yeniden Adlandır (${multiCount})` : '✏️ Yeniden Adlandır', shortcut: 'F2', onClick: () => renameSelected(dualSelItems.length ? dualSelItems : [dualItem]) },
+          { label: '🔗 Kısayol Oluştur (Burada)', onClick: () => createShortcutsInDir(dualSelItems.length ? dualSelItems : [dualItem], state.dualPath) },
+          { label: '🖥️ Masaüstüne Kısayol Gönder', onClick: () => createShortcutsInDir(dualSelItems.length ? dualSelItems : [dualItem], 'DESKTOP') },
           { sep: true },
           multiCount === 1 ? { label: '📂 Bulunduğu Yeri Aç', onClick: () => revealInExplorer(p) } : null,
           { label: multiCount > 1 ? `🔗 Yolları Kopyala (${multiCount})` : '🔗 Yolu Kopyala', onClick: () => { navigator.clipboard.writeText(dualSelPaths.join('\n')); toast('Yol kopyalandı'); } },

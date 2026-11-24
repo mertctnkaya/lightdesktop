@@ -5,6 +5,7 @@ import { formatBytes } from '../../utils/formatters.js';
 import { api } from '../../services/apiClient.js';
 import { toast } from '../shared/toast.js';
 import { refreshVaultSettingsUI } from './protectedVaultModal.js';
+import { refreshActivitySettingsUI } from './activityLogModal.js';
 
 function syncSettingsForm() {
   const s = state.settings;
@@ -256,6 +257,7 @@ function openSettingsDialog() {
   refreshSettingsCacheStats();
   refreshIntegrationStatus();
   refreshVaultSettingsUI();
+  refreshActivitySettingsUI();
   const dlg = $('settings-dialog');
   if (dlg && !dlg.open) dlg.showModal();
 }

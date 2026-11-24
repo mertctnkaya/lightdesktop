@@ -16,6 +16,7 @@ import { setupViewportResizeObserver } from './components/scroller/virtualScroll
 import { pollIndexStatus } from './components/analyzer/analyzerAndDuplicates.js';
 import { pollTransferStatus } from './components/operations/processAndErrorCenter.js';
 import { openWelcomeSetupDialog } from './components/settings/settingsAndWelcome.js';
+import { bindActivityLogHandlers, refreshActivitySettingsUI } from './components/settings/activityLogModal.js';
 
 const UI_BOOT_MARKS = [{ stage: 'main.js modul yuklendi', epochMs: Date.now() }];
 let uiProfileFlushed = false;
@@ -96,6 +97,7 @@ async function init() {
   try { setupDragAndDrop(); } catch {}
   try { setupHoverVideoStoryboard(); } catch {}
   try { setupViewportResizeObserver(); } catch {}
+  try { bindActivityLogHandlers(); } catch {}
   if (!(window.chrome && window.chrome.webview)) {
     await restoreWindowBounds();
     if (window.__ldMarkStartup) window.__ldMarkStartup('restoreWindowBounds() bitti');
@@ -108,6 +110,7 @@ async function init() {
 
   if (ok) {
     setTimeout(() => { openWelcomeSetupDialog(false); }, 450);
+    setTimeout(() => { refreshActivitySettingsUI(); }, 950);
   }
 
   if (!ok) {

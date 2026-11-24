@@ -574,3 +574,319 @@
   border-color: var(--danger);
 }
 
+
+/* Klasör Değişim İzleyici & Aktivite Logları */
+#btn-activity-log.active-watch {
+  border-color: rgba(63, 185, 80, 0.5);
+  color: #8ee69c;
+}
+.activity-log-dialog {
+  width: min(980px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+.act-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.act-disk-badge {
+  font-size: 11px;
+  color: #a9b8ca;
+  background: #22262c;
+  border: 1px solid #333942;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-variant-numeric: tabular-nums;
+}
+.act-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: #1b1b1b;
+}
+.act-tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.act-tab-btn.active {
+  color: #fff;
+  border-bottom-color: var(--accent);
+}
+.act-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.act-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.act-search-input {
+  flex: 1 1 210px;
+  min-width: 170px;
+  background: #141414;
+  border: 1px solid #353535;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+.act-event-pills {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.act-ev-pill {
+  background: #232323;
+  border: 1px solid #363636;
+  color: #c2c8d0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.act-ev-pill.active {
+  background: rgba(0, 120, 212, 0.28);
+  border-color: var(--accent);
+  color: #fff;
+}
+.act-col-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: #181a1e;
+  border: 1px solid #2b2f36;
+  border-radius: 6px;
+}
+.act-col-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: #c8cfd8;
+  cursor: pointer;
+  user-select: none;
+}
+.act-logs-list {
+  flex: 1;
+  min-height: 220px;
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #131313;
+  border: 1px solid #2a2a2a;
+  border-radius: 7px;
+  padding: 6px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.act-log-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 34px 6px 8px;
+  border-radius: 5px;
+  background: #1b1d20;
+  border: 1px solid #26292e;
+  font-size: 12px;
+  cursor: text;
+}
+.act-log-row:hover {
+  border-color: #3a414d;
+  background: #202328;
+}
+.act-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+.act-cell-time {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+  color: #8f9aa8;
+}
+.act-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+.act-badge-created { background: rgba(46, 160, 67, 0.22); color: #6ee787; }
+.act-badge-modified { background: rgba(56, 139, 253, 0.22); color: #79c0ff; }
+.act-badge-deleted { background: rgba(248, 81, 73, 0.22); color: #ff8a80; }
+.act-badge-renamed { background: rgba(210, 153, 34, 0.24); color: #f6c453; }
+.act-badge-batch { background: rgba(163, 113, 247, 0.22); color: #d2a8ff; }
+.act-cell-kind {
+  font-size: 11px;
+  color: #aeb7c4;
+}
+.act-cell-name {
+  font-weight: 600;
+  color: #f0f4f8;
+}
+.act-cell-size,
+.act-cell-meta {
+  font-size: 11px;
+  color: #a6b3c2;
+  background: #25282e;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.act-cell-delta {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.act-cell-delta.pos { color: #6ee787; }
+.act-cell-delta.neg { color: #ff8a80; }
+.act-row-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11px;
+  color: #85909d;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  word-break: break-all;
+}
+.act-jump-btn {
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  background: #272b30;
+  border: 1px solid #383e47;
+  color: #d6dde6;
+  border-radius: 4px;
+  width: 24px;
+  height: 22px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+.act-jump-btn:hover { background: #343a42; }
+.act-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.act-footer-btns {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.act-watch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.act-watch-toolbar-btns {
+  display: flex;
+  gap: 6px;
+}
+.act-watches-list {
+  flex: 1;
+  min-height: 180px;
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.act-watch-card {
+  background: #1b1d20;
+  border: 1px solid #2e333b;
+  border-radius: 7px;
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.act-watch-card.paused {
+  opacity: 0.72;
+}
+.act-watch-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.act-watch-path {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: #edf2f7;
+  word-break: break-all;
+}
+.act-watch-top-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.act-watch-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: #c2cad4;
+}
+.act-mini-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.act-opt-sep { color: #464c56; }
+.act-global-opts {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.act-opt-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+.act-opt-nums {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.act-num-input {
+  width: 78px;
+  background: #141414;
+  border: 1px solid #353535;
+  color: var(--text);
+  border-radius: 5px;
+  padding: 4px 6px;
+  font-size: 12px;
+}

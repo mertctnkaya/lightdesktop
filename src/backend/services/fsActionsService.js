@@ -270,6 +270,80 @@ async function handleFsAction(body) {
     return { ok: true, queued: true, jobId: job.id, job };
   }
 
+  if (action === 'createShortcut') {
+    const rawItems = Array.isArray(body.items) && body.items.length > 0
+      ? body.items
+      : (body.targetPath ? [{ targetPath: body.targetPath, name: body.name || '', args: body.args || '', description: body.description || '' }] : []);
+    if (rawItems.length === 0) throw new Error('Kısayol hedefi belirtilmedi');
+    const rawDest = String(body.destDir || '').trim();
+    if (!rawDest) throw new Error('Kısayol hedef klasörü belirtilmedi');
+    const destDir = rawDest.toUpperCase() === 'DESKTOP' ? 'DESKTOP' : path.resolve(rawDest);
+
+    const payloadB64 = Buffer.from(
+      JSON.stringify({
+        destDir,
+        items: rawItems.map((it) => ({
+          targetPath: path.resolve(String(it.targetPath || '')),
+          name: String(it.name || '').trim(),
+          args: String(it.args || '').trim(),
+          description: String(it.description || '').trim(),
+        })),
+      }),
+      'utf8'
+    ).toString('base64');
+
+    const psOut = await runPowerShellEnv(
+      `
+        $ProgressPreference = 'SilentlyContinue'
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $json = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:LD_SC_B64))
+        $payload = $json | ConvertFrom-Json
+        $destDir = [string]$payload.destDir
+        if ($destDir -eq 'DESKTOP') { $destDir = [Environment]::GetFolderPath('Desktop') }
+        if (-not (Test-Path -LiteralPath $destDir)) { throw 'Hedef klasor bulunamadi.' }
+        $ws = New-Object -ComObject WScript.Shell
+        $created = @()
+        foreach ($it in $payload.items) {
+          $target = [string]$it.targetPath
+          $base = ([string]$it.name).Trim()
+          if (-not $base) {
+            $bName = [System.IO.Path]::GetFileNameWithoutExtension($target)
+            if (-not $bName) { $bName = [System.IO.Path]::GetFileName($target) }
+            if (-not $bName) { $bName = 'Kisayol' }
+            $base = $bName + ' - Kisayol'
+          }
+          $base = $base -replace '[<>:"/\\\\|?*]', '_'
+          if ($base.ToLower().EndsWith('.lnk')) { $base = $base.Substring(0, $base.Length - 4) }
+          $lnk = Join-Path $destDir ($base + '.lnk')
+          $idx = 2
+          while (Test-Path -LiteralPath $lnk) {
+            $lnk = Join-Path $destDir ($base + ' (' + $idx + ').lnk')
+            $idx++
+          }
+          $sc = $ws.CreateShortcut($lnk)
+          $sc.TargetPath = $target
+          if (Test-Path -LiteralPath $target -PathType Container) { $sc.WorkingDirectory = $target }
+          else {
+            $parentDir = Split-Path -Parent $target
+            if ($parentDir) { $sc.WorkingDirectory = $parentDir }
+          }
+          if ($it.args) { $sc.Arguments = [string]$it.args }
+          if ($it.description) { $sc.Description = [string]$it.description }
+          $sc.Save()
+          $created += [PSCustomObject]@{ path = $lnk; name = [System.IO.Path]::GetFileName($lnk); target = $target }
+        }
+        @{ ok = $true; destDir = $destDir; created = @($created) } | ConvertTo-Json -Depth 4 -Compress
+        exit 0
+      `,
+      { LD_SC_B64: payloadB64 }
+    );
+
+    const parsed = JSON.parse(String(psOut || '{}').trim() || '{}');
+    const created = Array.isArray(parsed.created) ? parsed.created : (parsed.created ? [parsed.created] : []);
+    if (parsed.destDir) markDirMutated(parsed.destDir);
+    return { ok: true, destDir: parsed.destDir || destDir, created };
+  }
+
   if (action === 'installShortcut') {
     const res = await applySystemIntegration({ action: 'installShortcuts' });
     return { ok: true, status: res.status };

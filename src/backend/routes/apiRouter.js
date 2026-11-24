@@ -51,6 +51,14 @@ const {
   purgeVaultEntries,
 } = require('../services/protectedVaultService');
 const { listZipEntries, extractZipEntries, createZipArchive } = require('../services/zipService');
+const {
+  addOrToggleWatchPath,
+  clearActivityLogs,
+  compressActivityLogsNow,
+  getActivityConfigAndStats,
+  queryActivityLogs,
+  saveActivityConfig,
+} = require('../services/activityWatcherService');
 
 let activePropsToken = null;
 
@@ -666,6 +674,43 @@ async function handleApiRoute(req, res, url, pathname) {
     if (pathname === '/api/vault/purge' && req.method === 'POST') {
       const body = await readJsonBody(req);
       return sendJson(res, 200, await purgeVaultEntries(body.ids || [], Boolean(body.all)));
+    }
+
+    if (pathname === '/api/activity/config' && req.method === 'GET') {
+      return sendJson(res, 200, getActivityConfigAndStats());
+    }
+
+    if (pathname === '/api/activity/config' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      return sendJson(res, 200, saveActivityConfig(body));
+    }
+
+    if (pathname === '/api/activity/watch/add' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      return sendJson(res, 200, addOrToggleWatchPath(body.path, body));
+    }
+
+    if (pathname === '/api/activity/logs' && req.method === 'GET') {
+      return sendJson(
+        res,
+        200,
+        queryActivityLogs({
+          q: url.searchParams.get('q') || '',
+          event: url.searchParams.get('event') || 'ALL',
+          watchRoot: url.searchParams.get('watchRoot') || '',
+          file: url.searchParams.get('file') || '',
+          limit: url.searchParams.get('limit') || 400,
+        })
+      );
+    }
+
+    if (pathname === '/api/activity/compress' && req.method === 'POST') {
+      return sendJson(res, 200, compressActivityLogsNow());
+    }
+
+    if (pathname === '/api/activity/clear' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      return sendJson(res, 200, clearActivityLogs(body));
     }
 
     if (pathname === '/api/startup-profile' && req.method === 'POST') {

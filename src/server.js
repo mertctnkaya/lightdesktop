@@ -16,6 +16,7 @@ const { prewarmDrives } = require('./backend/services/drivesAndFsService');
 const { serveStaticAsset, prewarmStaticAssets } = require('./backend/services/staticAssetServer');
 const { handleApiRoute } = require('./backend/routes/apiRouter');
 const { purgeExpiredVaultEntries } = require('./backend/services/protectedVaultService');
+const { startActivityWatchers } = require('./backend/services/activityWatcherService');
 
 process.on('uncaughtException', (err) => {
   writeFatalCrashDump('uncaughtException', err);
@@ -116,5 +117,6 @@ server.listen(PORT, HOST, () => {
     try { listRecycleBin().catch(() => {}); } catch {}
     try { getWarmRecycleWorker(); } catch {}
     try { purgeExpiredVaultEntries().catch(() => {}); } catch {}
+    try { startActivityWatchers(); } catch {}
   }, 400);
 });

@@ -4,6 +4,7 @@ import { calculateCurrentFolderSizes, findAndRenderDuplicates, openAnalyzer } fr
 import { renderBasket, toggleDualPane } from '../operations/basketAndDualPane.js';
 import { toggleDragShelfVisible } from '../sidebar/dragShelf.js';
 import { openSettingsDialog } from '../settings/settingsAndWelcome.js';
+import { openActivityLogModal } from '../settings/activityLogModal.js';
 import { state } from '../../store/appState.js';
 import { toast } from '../shared/toast.js';
 import { openSmartView } from '../sidebar/smartViews.js';
@@ -39,6 +40,7 @@ function buildCommandPaletteEntries(rawQuery) {
     { icon: '🧲', title: 'Geçici Yüzen Rafı Aç / Kapat (Ctrl+Shift+S)', sub: 'Dosyaları park edip başka klasöre taşı', badge: 'Eylem', run: () => toggleDragShelfVisible() },
     { icon: '🎯', title: 'Gelişmiş Filtre & Aralık Stüdyosu', sub: 'Numara, tarih, boyut ve RegExp filtresi', badge: 'Eylem', run: () => $('btn-range-studio')?.click() },
     { icon: '⚙️', title: 'Ayarlar Merkezi (Ctrl+,)', sub: 'Görünüm, medya ve Windows entegrasyonu', badge: 'Eylem', run: openSettingsDialog },
+    { icon: '📝', title: 'Klasör İzleme & Aktivite Logları', sub: 'İzlenen yollar, dosya değişim geçmişi ve .gz sıkıştırma', badge: 'Eylem', run: () => openActivityLogModal('logs') },
     { icon: '🧹', title: 'Sepeti Temizle', sub: 'Toplama sepetindeki tüm öğeleri çıkar', badge: 'Eylem', run: () => { state.basket.clear(); renderBasket(); toast('Sepet temizlendi'); } },
   ];
 
