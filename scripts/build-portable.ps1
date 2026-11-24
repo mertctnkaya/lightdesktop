@@ -103,67 +103,81 @@ if ($LASTEXITCODE -ne 0) {
   throw "csc.exe derleme hatasi verdi (ExitCode=$LASTEXITCODE)"
 }
 
-function Install-PortableBinary([string]$srcPath, [string]$destPath, [bool]$stopLockersOnFail, [bool]$relaunchIfStopped) {
-  $fullDest = [System.IO.Path]::GetFullPath($destPath)
-  $oldPath = $fullDest + '.old'
-  if (Test-Path -LiteralPath $oldPath) {
-    Remove-Item -LiteralPath $oldPath -Force -ErrorAction SilentlyContinue
-  }
+# Derleme tamamlandiktan sonra acik LightDesktop varsa temizce kapatip guncel EXE ile yeniden baslat
+$fullOutExe = [System.IO.Path]::GetFullPath($outExe)
+$fixedExe = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'LightDesktop\LightDesktop.exe' } else { '' }
+$fullFixedExe = if ($fixedExe) { [System.IO.Path]::GetFullPath($fixedExe) } else { '' }
 
-  $copied = $false
-  try {
-    Copy-Item -LiteralPath $srcPath -Destination $fullDest -Force
-    $copied = $true
-  } catch {
-    if (Test-Path -LiteralPath $fullDest) {
-      try {
-        Move-Item -LiteralPath $fullDest -Destination $oldPath -Force
-        Copy-Item -LiteralPath $srcPath -Destination $fullDest -Force
-        $copied = $true
-      } catch {}
+$runningHosts = @()
+try {
+  $runningHosts = @(Get-CimInstance Win32_Process -Filter "Name = 'LightDesktop.exe'" -ErrorAction SilentlyContinue)
+} catch {}
+
+$relaunchExe = ''
+$relaunchArgs = ''
+if ($runningHosts.Count -gt 0) {
+  foreach ($procInfo in $runningHosts) {
+    $ep = if ($procInfo.ExecutablePath) { [System.IO.Path]::GetFullPath($procInfo.ExecutablePath) } else { '' }
+    if ($fullFixedExe -and $ep -ieq $fullFixedExe) {
+      $relaunchExe = $fullFixedExe
+    } elseif (-not $relaunchExe) {
+      $relaunchExe = $fullOutExe
+    }
+    if (-not $relaunchArgs -and $procInfo.CommandLine) {
+      if ($procInfo.CommandLine -match '--background') {
+        $relaunchArgs = '--background'
+      } elseif ($procInfo.CommandLine -match '^\s*"[^"]+"\s+(.+)$') {
+        $relaunchArgs = $matches[1].Trim()
+      }
     }
   }
 
-  $stopped = $false
-  if (-not $copied -and $stopLockersOnFail) {
-    $lockingProcs = @(Get-Process -Name 'LightDesktop' -ErrorAction SilentlyContinue | Where-Object {
-      try { $_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -ieq $fullDest) } catch { $false }
-    })
-    if ($lockingProcs.Count -gt 0) {
-      Write-Host ("Hedef EXE kilitli (" + $lockingProcs.Count + " surec), degistirmek icin kapatiliyor: " + $fullDest)
-      $lockingProcs | Stop-Process -Force -ErrorAction SilentlyContinue
-      Start-Sleep -Milliseconds 450
-      $stopped = $true
-    }
-    Copy-Item -LiteralPath $srcPath -Destination $fullDest -Force
-    $copied = $true
+  Write-Host ("Acik LightDesktop surecleri guncelleme icin kapatiliyor (" + $runningHosts.Count + " surec)...")
+  foreach ($procInfo in $runningHosts) {
+    try {
+      $p = Get-Process -Id ([int]$procInfo.ProcessId) -ErrorAction SilentlyContinue
+      if ($p) {
+        $null = $p.CloseMainWindow()
+      }
+    } catch {}
   }
+  Start-Sleep -Milliseconds 650
 
-  if ($copied) {
-    Remove-Item -LiteralPath $oldPath -Force -ErrorAction SilentlyContinue
+  foreach ($procInfo in $runningHosts) {
+    try {
+      $p = Get-Process -Id ([int]$procInfo.ProcessId) -ErrorAction SilentlyContinue
+      if ($p -and -not $p.HasExited) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      }
+    } catch {}
   }
-  if ($stopped -and $relaunchIfStopped) {
-    Start-Process -FilePath $fullDest | Out-Null
+  Start-Sleep -Milliseconds 350
+
+  # Portable runtime icinden calisan eski arka plan node.exe varsa temizle (yeni surum temiz port alsin)
+  if ($env:LOCALAPPDATA) {
+    $rtPrefix = Join-Path $env:LOCALAPPDATA 'LightDesktopRuntime'
+    try {
+      $rtNodes = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | Where-Object {
+        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($rtPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+      })
+      foreach ($rn in $rtNodes) {
+        Stop-Process -Id ([int]$rn.ProcessId) -Force -ErrorAction SilentlyContinue
+      }
+    } catch {}
   }
-  return $copied
 }
 
-Install-PortableBinary -srcPath $tempOutExe -destPath $outExe -stopLockersOnFail $true -relaunchIfStopped $true | Out-Null
-Remove-Item -Path $tempOutExe -Force -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath $tempOutExe -Destination $fullOutExe -Force
+Remove-Item -LiteralPath $tempOutExe -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath ($fullOutExe + '.old') -Force -ErrorAction SilentlyContinue
 
-# Eger sabit kurulum (%LOCALAPPDATA%\LightDesktop\LightDesktop.exe) varsa kilidi bozmadan in-place guncelle
-if ($env:LOCALAPPDATA) {
-  $fixedExe = Join-Path $env:LOCALAPPDATA 'LightDesktop\LightDesktop.exe'
-  if (Test-Path $fixedExe) {
-    if (Install-PortableBinary -srcPath $outExe -destPath $fixedExe -stopLockersOnFail $false -relaunchIfStopped $false) {
-      Write-Host ("Sabit konum EXE de guncellendi: " + $fixedExe)
-    } else {
-      Write-Host ("Bilgi: Sabit konum EXE guncellenemedi (" + $fixedExe + ").")
-    }
-  }
+if ($fullFixedExe -and (Test-Path -LiteralPath $fullFixedExe)) {
+  Copy-Item -LiteralPath $fullOutExe -Destination $fullFixedExe -Force
+  Remove-Item -LiteralPath ($fullFixedExe + '.old') -Force -ErrorAction SilentlyContinue
+  Write-Host ("Sabit konum EXE guncellendi: " + $fullFixedExe)
 }
 
-$exeItem = Get-Item $outExe
+$exeItem = Get-Item $fullOutExe
 $zipItem = Get-Item $payloadZip
 $rawBytes = (Get-ChildItem $stagingDir -Recurse -File | Measure-Object -Property Length -Sum).Sum
 Write-Host ""
@@ -171,4 +185,13 @@ Write-Host ("BASARILI! Portable EXE hazir: " + $exeItem.FullName)
 Write-Host ("Acik toplam boyut : {0:N1} MB" -f ($rawBytes / 1MB))
 Write-Host ("Sikistirilmis ZIP : {0:N1} MB" -f ($zipItem.Length / 1MB))
 Write-Host ("Nihai EXE boyutu  : {0:N1} MB ({1:N0} bayt)" -f ($exeItem.Length / 1MB), $exeItem.Length)
+
+if ($relaunchExe -and (Test-Path -LiteralPath $relaunchExe)) {
+  Write-Host ("Guncel LightDesktop yeniden baslatiliyor: " + $relaunchExe)
+  if ($relaunchArgs) {
+    Start-Process -FilePath $relaunchExe -ArgumentList $relaunchArgs | Out-Null
+  } else {
+    Start-Process -FilePath $relaunchExe | Out-Null
+  }
+}
 exit 0

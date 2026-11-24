@@ -30,9 +30,11 @@ function resolveWritableCacheRoot() {
 // Tüm önbellek ve indeks verileri yavaş HDD (D:) yerine hızlı sistem SSD'sinde (C:\AppData\Local) tutulur.
 const CACHE_ROOT = resolveWritableCacheRoot();
 const THUMBS_DIR = path.join(CACHE_ROOT, 'thumbs');
+const STORYBOARDS_DIR = path.join(CACHE_ROOT, 'storyboards');
 const DB_PATH = path.join(CACHE_ROOT, 'lightdesktop.db');
 
 fs.mkdirSync(THUMBS_DIR, { recursive: true });
+fs.mkdirSync(STORYBOARDS_DIR, { recursive: true });
 
 const SCHEMA_SQL = `
   PRAGMA journal_mode = WAL;
@@ -58,6 +60,7 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_file_name_lower ON file_index(name_lower);
   CREATE INDEX IF NOT EXISTS idx_file_category ON file_index(category);
   CREATE INDEX IF NOT EXISTS idx_file_size ON file_index(size);
+  CREATE INDEX IF NOT EXISTS idx_file_mtime ON file_index(mtime);
 
   CREATE TABLE IF NOT EXISTS thumbs (
     cache_key TEXT PRIMARY KEY,
@@ -72,6 +75,15 @@ const SCHEMA_SQL = `
     path TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS analysis_cache (
+    cache_key TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    target_path TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    dir_mtime_ms INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
   );
 `;
 
@@ -2114,9 +2126,258 @@ async function clearThumbCache() {
   return getIndexStats();
 }
 
+// ---------- Analiz / Kopya / Klasör Boyutu Önbelleği & Akıllı Sanal Görünümler ----------
+function normalizeCachePath(p) {
+  const res = path.resolve(String(p || 'C:\\'));
+  return res.replace(/[\\/]+$/, '').toLowerCase() || res.toLowerCase();
+}
+
+const stmtGetAnalysisCache = db.prepare(`
+  SELECT kind, target_path, payload_json, dir_mtime_ms, created_at
+  FROM analysis_cache WHERE cache_key = ?
+`);
+
+const stmtSetAnalysisCache = db.prepare(`
+  INSERT INTO analysis_cache (cache_key, kind, target_path, payload_json, dir_mtime_ms, created_at)
+  VALUES (?, ?, ?, ?, ?, ?)
+  ON CONFLICT(cache_key) DO UPDATE SET
+    target_path = excluded.target_path,
+    payload_json = excluded.payload_json,
+    dir_mtime_ms = excluded.dir_mtime_ms,
+    created_at = excluded.created_at
+`);
+
+function getAnalysisCache(kind, targetPath, lastMutationAt = 0) {
+  try {
+    const key = `${kind}|${normalizeCachePath(targetPath)}`;
+    const row = stmtGetAnalysisCache.get(key);
+    if (!row) return null;
+    const payload = JSON.parse(row.payload_json);
+    let stale = false;
+    let staleReason = '';
+
+    try {
+      const st = fs.statSync(path.resolve(targetPath));
+      const curMtime = Math.floor(st.mtimeMs || 0);
+      if (row.dir_mtime_ms > 0 && curMtime > row.dir_mtime_ms + 1000) {
+        stale = true;
+        staleReason = 'Klasörde değişiklik algılandı';
+      }
+    } catch {}
+
+    if (!stale && lastMutationAt > row.created_at) {
+      stale = true;
+      staleReason = 'Son taramadan sonra dosya işlemi yapıldı';
+    }
+    if (!stale && Date.now() - row.created_at > 3 * 24 * 60 * 60 * 1000) {
+      stale = true;
+      staleReason = 'Önbellek 3 günden eski';
+    }
+
+    return {
+      data: payload,
+      cachedAt: row.created_at,
+      stale,
+      staleReason,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function setAnalysisCache(kind, targetPath, payload) {
+  try {
+    const resolved = path.resolve(targetPath);
+    const key = `${kind}|${normalizeCachePath(resolved)}`;
+    let dirMtimeMs = 0;
+    try {
+      dirMtimeMs = Math.floor(fs.statSync(resolved).mtimeMs || 0);
+    } catch {}
+    stmtSetAnalysisCache.run(key, kind, resolved, JSON.stringify(payload), dirMtimeMs, Date.now());
+  } catch {}
+}
+
+function querySmartView(criteria = {}) {
+  const t0 = performance.now();
+  const wheres = ['is_dir = 0'];
+  const params = [];
+
+  if (criteria.category && criteria.category !== 'all') {
+    wheres.push('category = ?');
+    params.push(String(criteria.category));
+  }
+  if (Array.isArray(criteria.extList) && criteria.extList.length > 0) {
+    const cleanExts = criteria.extList.map((e) => {
+      const s = String(e || '').trim().toLowerCase();
+      return s.startsWith('.') ? s : `.${s}`;
+    }).filter((s) => s.length > 1);
+    if (cleanExts.length > 0) {
+      wheres.push(`ext IN (${cleanExts.map(() => '?').join(',')})`);
+      params.push(...cleanExts);
+    }
+  }
+  if (Number(criteria.minSize) > 0) {
+    wheres.push('size >= ?');
+    params.push(Number(criteria.minSize));
+  }
+  if (Number(criteria.maxSize) > 0) {
+    wheres.push('size <= ?');
+    params.push(Number(criteria.maxSize));
+  }
+  if (Number(criteria.withinDays) > 0) {
+    wheres.push('mtime >= ?');
+    params.push(Date.now() - Number(criteria.withinDays) * 24 * 60 * 60 * 1000);
+  }
+  if (criteria.nameContains && String(criteria.nameContains).trim()) {
+    wheres.push('name_lower LIKE ?');
+    params.push(`%${String(criteria.nameContains).trim().toLowerCase()}%`);
+  }
+  if (criteria.driveRoot && String(criteria.driveRoot).trim()) {
+    let prefix = path.resolve(String(criteria.driveRoot));
+    if (!prefix.endsWith('\\')) prefix += '\\';
+    wheres.push("path LIKE ? ESCAPE '\\'");
+    params.push(escapeLikePrefix(prefix));
+  }
+
+  const orderCol = criteria.sortBy === 'size' ? 'size DESC, mtime DESC' : 'mtime DESC, size DESC';
+  const limit = Math.min(1000, Math.max(50, Number(criteria.limit) || 600));
+  const sql = `
+    SELECT path, parent_dir, name, ext, category, size, mtime, ctime
+    FROM file_index
+    WHERE ${wheres.join(' AND ')}
+    ORDER BY ${orderCol}
+    LIMIT ?
+  `;
+  const rows = db.prepare(sql).all(...params, limit);
+  const totalIndexed = db.prepare('SELECT COUNT(*) AS cnt FROM file_index WHERE is_dir = 0').get()?.cnt || 0;
+
+  const items = rows.map((r) => {
+    const tk = makeThumbKey(r.path, r.mtime, r.size);
+    return {
+      name: r.name,
+      path: r.path,
+      parentDir: r.parent_dir,
+      ext: r.ext,
+      category: r.category,
+      isDir: false,
+      size: r.size,
+      mtime: r.mtime,
+      ctime: r.ctime,
+      hasCachedThumb: cachedThumbSet.has(`${tk}.jpg`),
+    };
+  });
+
+  return {
+    items,
+    totalIndexed,
+    durationMs: Number((performance.now() - t0).toFixed(1)),
+  };
+}
+
+// ---------- Hover Video Storyboard Üretici (Concurrency = 1, SSD Önbellekli) ----------
+const storyboardQueue = [];
+const inFlightStoryboards = new Map();
+let storyboardRunning = false;
+
+function probeVideoDurationSec(ffmpegBin, filePath) {
+  return new Promise((resolve) => {
+    execFile(ffmpegBin, ['-nostdin', '-hide_banner', '-i', filePath], { timeout: 5000, maxBuffer: 2 * 1024 * 1024, windowsHide: true }, (_err, _stdout, stderr) => {
+      const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(String(stderr || ''));
+      if (m) {
+        const secs = Number(m[1]) * 3600 + Number(m[2]) * 60 + parseFloat(m[3]);
+        if (Number.isFinite(secs) && secs > 0) return resolve(secs);
+      }
+      resolve(15);
+    });
+  });
+}
+
+async function generateStoryboardStrip(ffmpegBin, filePath, outPath) {
+  const dur = await probeVideoDurationSec(ffmpegBin, filePath);
+  const pcts = [0.08, 0.28, 0.50, 0.72, 0.90];
+  const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y'];
+  for (const pct of pcts) {
+    const sec = dur <= 1.2 ? 0 : Math.max(0.05, Math.min(dur - 0.15, dur * pct)).toFixed(2);
+    args.push('-ss', String(sec), '-noaccurate_seek', '-i', filePath);
+  }
+  const filters = [];
+  const labels = [];
+  for (let i = 0; i < 5; i++) {
+    filters.push(`[${i}:v]scale=256:144:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=256:144:(ow-iw)/2:(oh-ih)/2:color=#111111,setsar=1,setpts=PTS-STARTPTS[v${i}]`);
+    labels.push(`[v${i}]`);
+  }
+  const tmpOut = `${outPath}.tmp.jpg`;
+  args.push('-filter_complex', `${filters.join(';')};${labels.join('')}hstack=inputs=5[outv]`, '-map', '[outv]', '-frames:v', '1', '-q:v', '6', tmpOut);
+
+  return new Promise((resolve) => {
+    execFile(ffmpegBin, args, { timeout: 14000, maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (err) => {
+      if (err || !fs.existsSync(tmpOut)) {
+        try { if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut); } catch {}
+        return resolve(false);
+      }
+      try {
+        fs.renameSync(tmpOut, outPath);
+        resolve(true);
+      } catch {
+        try { if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut); } catch {}
+        resolve(false);
+      }
+    });
+  });
+}
+
+async function processStoryboardQueue() {
+  if (storyboardRunning) return;
+  storyboardRunning = true;
+  try {
+    while (storyboardQueue.length > 0) {
+      const job = storyboardQueue.shift();
+      try {
+        if (!fs.existsSync(job.outPath)) {
+          await generateStoryboardStrip(job.ffmpegBin, job.filePath, job.outPath);
+        }
+        job.resolve(fs.existsSync(job.outPath) ? { available: true, filePath: job.outPath, fromCache: false } : { available: false });
+      } catch {
+        job.resolve({ available: false });
+      } finally {
+        inFlightStoryboards.delete(job.key);
+      }
+    }
+  } finally {
+    storyboardRunning = false;
+  }
+}
+
+async function getOrCreateVideoStoryboard(filePath) {
+  const ffmpegBin = getFfmpegBin();
+  if (!ffmpegBin) return { available: false };
+  const resolved = path.resolve(filePath);
+  let st;
+  try {
+    st = await fsp.stat(resolved);
+    if (!st.isFile()) return { available: false };
+  } catch {
+    return { available: false };
+  }
+  const tk = makeThumbKey(resolved, Math.floor(st.mtimeMs || 0), st.size || 0);
+  const outPath = path.join(STORYBOARDS_DIR, `${tk}_sb.jpg`);
+  if (fs.existsSync(outPath)) {
+    return { available: true, filePath: outPath, fromCache: true };
+  }
+  if (inFlightStoryboards.has(tk)) return inFlightStoryboards.get(tk);
+
+  const p = new Promise((resolve) => {
+    storyboardQueue.push({ key: tk, filePath: resolved, outPath, ffmpegBin, resolve });
+    processStoryboardQueue();
+  });
+  inFlightStoryboards.set(tk, p);
+  return p;
+}
+
 module.exports = {
   CACHE_ROOT,
   THUMBS_DIR,
+  STORYBOARDS_DIR,
   getCategory,
   upsertDirEntries,
   getCachedStatsMap,
@@ -2144,5 +2405,9 @@ module.exports = {
   removePin,
   getFfmpegBin,
   runWindowsShellThumb,
+  getAnalysisCache,
+  setAnalysisCache,
+  querySmartView,
+  getOrCreateVideoStoryboard,
   getDbInitWarning: () => dbInitWarning,
 };

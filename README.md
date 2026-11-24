@@ -50,6 +50,7 @@ Hiçbir ek program yüklemeden doğrudan kullanmak için:
   - **Tüm Klasör:** İstediğiniz klasördeki tüm kapakları sırayla önbelleğe alır (dilediğiniz an durdurulabilir).
   - _Ayrıca kapaklar kapalıyken bile herhangi bir satırdaki **👁️** simgesine tıklayarak sadece o dosyanın önizleme kapağını yükletebilirsiniz._
 - **Sıfır Kurulumla Video & Fotoğraf Kapağı `(v1.1.0)`:** Bilgisayarda FFmpeg kurulu olmasa bile yerleşik Windows Shell desteği sayesinde video ve fotoğraf kapaklarını ek kurulum gerektirmeden üretir.
+- **Hover Video Storyboard (`🎞️ Sahne Gezme`):** Büyük kapak görünümlerinde fareyi bir video kartının üstünde ~350 ms beklettiğinizde 5 sahne karesi otomatik olarak sırayla oynatılır; fareyi sağa sola kaydırarak kareler arasında anlık gezinebilirsiniz (SSD'de tek seferlik önbelleklenir).
 - **Sürüklenebilir Sütunlar & Başlık Filtresi `(v1.1.0)`:** Liste görünümünde `Ad`, `Değiştirme tarihi`, `Tür` ve `Boyut` sütun genişliklerini sürükleyerek ayarlayabilir (çift tıkla sıfırlanır) ve her sütunun yanındaki `▾` okundan Windows tarzı hızlı filtre/sıralama yapabilirsiniz.
 - **Klasöre Özel Görünüm Hafızası `(v1.1.0)`:** Her klasör için seçtiğiniz görünüm modu (liste, kapak vb.) klasör bazında otomatik hatırlanır.
 
@@ -57,7 +58,8 @@ Hiçbir ek program yüklemeden doğrudan kullanmak için:
 
 Harici bir fotoğraf veya video oynatıcı açıp kapatma derdini bitirir:
 
-- Herhangi bir dosyada **`Space` (Boşluk)** tuşuna bastığınızda anında önizleme penceresi açılır.
+- Herhangi bir dosyada **`Space` (Boşluk)** tuşuna bastığınızda veya fotoğraf, GIF ya da videolara **çift tıkladığınızda** (Ayarlar'dan değiştirilebilir) ekranın %70'inden fazlasını kaplayan büyük dahili önizleme penceresi açılır; dilediğiniz an üstteki **Varsayılan Uygulamada Aç** düğmesine de geçebilirsiniz.
+- **Videodan Kare Kare İlerleme (`,` / `.`), Kare Yakalama (`S`) & Kayıpsız Kırpma (`✂️ Kırp`):** Video izlerken **`⏮ Kare`** / **`Kare ⏭`** düğmeleri veya **`,` / `.`** tuşlarıyla kare kare (`Shift` ile 5'er kare) geri/ileri gidebilir; **`S`** tuşu veya **`📸 Kare Al`** ile tam o kareyi yüksek çözünürlükte JPEG olarak (videonun yanına ya da Ayarlar → **Yollar & Kayıt Konumları** bölümünden seçtiğiniz özel klasöre) kaydedebilirsiniz. **`✂️ Kırp`** ile görsel zaman çizelgesinden **A–B** tutamaçlarını sürükleyerek (ve **`▶ Seçimi Oynat`** ile önizleyerek) FFmpeg üzerinden yeniden kodlamadan (`-c copy`) orijinal dosyaya dokunmadan saniyeler içinde yeni kırpılmış klip oluşturabilirsiniz; kırpılan videoların varsayılan kayıt klasörünü de Ayarlar'dan seçebilirsiniz.
 - **Tek Tuşla Karar Ver ve Sonrakine Geç:**
   - Beğendiklerinizi **`B`** tuşuyla **Sepet**'e atın; otomatik olarak bir sonraki fotoğraf/videoya geçer. (Önizlemedeyken **`Sepette ✓`** butonuna veya **`B`** tuşuna basarak öğeyi sepetten çıkarabilirsiniz `(v1.1.0)`.)
   - İstemeyeceklerinizi **`Del`** tuşuyla anında Geri Dönüşüm Kutusu'na gönderin (hiç beklemeden ekrandan düşer ve hemen sıradaki dosyaya geçer).
@@ -79,10 +81,12 @@ Farklı farklı klasörlerden seçeceğiniz fotoğraf, belge veya videoları tek
 ### 4. Çift Panel (`F3`), Masaüstü Sürükle-Bırak ve Güvenli Transfer
 
 - **`F3`** tuşuyla ekranın sağında bağımsız bir hedef klasör paneli açılır.
+- **Sağ Panelde Seçim, Fareyle Kutulu Seçim & Kısayollar `(v1.1.0)`:** Sağ panelde tekli/çoklu (`Ctrl` / `Shift`) seçim yapabilir, fareyle sürükleyerek mavi seçim kutusuyla toplu seçebilir, sağ tık menüsü ve tüm klavye kısayollarını (`Space`, `Ctrl+A/C/X/V`, `Del`, `F2`, `B`, `↑/↓`, `Alt+Enter`) doğrudan sağ panelde kullanabilirsiniz.
 - Sol taraftan sağ panele (veya soldaki klasör ağacına) sürükleyip bırakarak taşıma yapabilir, **`Ctrl`** basılı tutarak kopyalayabilirsiniz.
 - **Çift Yönlü Masaüstü Sürükle-Bırak & Windows Pano Uyumu `(v1.1.0)`:** LightDesktop'tan Windows Masaüstü'ne veya diğer uygulamalara dosya sürükleyip bırakabilir, dışarıdan LightDesktop klasörlerine dosya bırakabilirsiniz. Uygulama içindeki `Ctrl+C` / `Ctrl+X` / `Ctrl+V` işlemleri Windows dosya panosuyla doğrudan uyumlu çalışır.
 - **Akıllı Disk Kuralı `(v1.1.0)`:** Aynı disk içine sürükle-bırak yaparken otomatik **taşıma**, farklı diske (ör. HDD'den Masaüstü'ne) sürüklerken kaynak dosyayı silmeden otomatik **kopyalama** uygulanır (`Ctrl` = Kopyala, `Shift` = Taşı).
 - **🕒 Son Erişilen Yollar `(v1.1.0)`:** Sol kenar çubuğunda _Cihazlar ve Sürücüler_ üstünde açılır kapanır liste halinde son dosya taşıdığınız veya kopyaladığınız 15 hedef klasör tutulur; doğrudan üzerine sürükle-bırakla ya da sağ tık **Gönder** menüsüyle tek hamlede dosya aktarabilirsiniz.
+- **🧲 Geçici Yüzen Raf (`Ctrl+Shift+S`):** Dosya sürüklemeye başlayınca sağ altta otomatik açılan **Geçici Raf**'a farklı klasörlerden seçtiğiniz dosyaları park edebilir, hedef klasöre geçince **Tümünü Sürükle** ya da tek tıkla **Buraya Taşı / Kopyala** diyerek aktarabilirsiniz.
 - **Transfer Doğrulama:** Başka bir diske dosya taşırken kaynak dosyanın silinmeden önce hedefe eksiksiz yazıldığı otomatik olarak kontrol edilir. Büyük işlemlerde alttaki ilerleme çubuğundan anlık hızı görebilir, işlemi duraklatabilir veya iptal edebilirsiniz.
 
 ### 5. Gelişmiş Aralık Seçimi, Akıllı Filtre (`🎯 Aralık & Filtre`) ve Benzerlerini Bul
@@ -92,14 +96,18 @@ _"IMG_1050 ile IMG_1420 arasını seç"_, _"100 MB'tan büyük videoları bul"_ 
 - İsim / kalıp arama, dosya adındaki sayı aralığı (`1050` – `1420`), boyut aralığı (`KB / MB / GB`), tarih aralığı, tür (video, fotoğraf, arşiv, belge, ses) ve satır sırası aralığı ile filtreleyin.
 - Eşleşenleri tek tıkla seçin, sepete atın, yeni klasöre taşıyın veya temizleyin.
 - **✨ İlişkili ve Benzer Dosyaları Bul `(v1.1.0)`:** Araç çubuğundan, sağ tık menüsünden veya Hızlı Önizleme içinden tek tıkla seçili dosyanın hem değiştirilme tarihine hem de dosya adındaki çekim tarihine göre **±1 saat**, **aynı gün**, **±3 gün**, **aynı ay** veya **benzer ad** modlarında bu klasörde, diskte ya da tüm indekslenmiş disklerde eşleşen diğer dosyaları tek listede toplayabilirsiniz.
+- **✨ Kaydedilmiş Akıllı Klasörler (Sanal Görünüm):** Sol kenar çubuğundaki _Akıllı Klasörler_ bölümünde hazır sanal görünümler (*Son 7 Gün Videoları*, *500 MB+ Büyük Dosyalar*, *Bu Ay Fotoğrafları*) bulunur; Gelişmiş Filtre Stüdyosu'ndaki **💾 Akıllı Klasör Kaydet** ile kendi kalıcı sanal klasörlerinizi ekleyebilirsiniz.
+- **⌘ Akıllı Komut & Hızlı Gezinti Paleti (`Ctrl+K`):** Tek kutudan tüm uygulama eylemlerine, disklere/kısayollara anında ulaşabilir ve `> 100mb video`, `bugün` gibi tek satır sorgularla filtre uygulayabilirsiniz.
 
 ### 6. Dağınık Telefon / Kamera Yedeklerini Tek Tıkla Düzenleme (`📅 Tarihle Klasörle`)
 
 - Binlerce karışık fotoğraf ve videonun olduğu bir klasörde **Tarihle Klasörle** butonuna bastığınızda önce size dosyaların nasıl ayrılacağını gösteren bir **önizleme** sunar.
-- Onayladığınızda dosyaları aynı disk içinde beklemeden **`Yıl\Yıl-Ay`** (örneğin `2025\2025-08`) klasörlerine otomatik olarak yerleştirir.
+- **Kopyala / Taşı Seçeneği, Hedef Seçimi & Düzenli Çıktı Klasörü `(v1.1.0)`:** İşlem öncesinde dosyaların **kopyalanarak** (orijinaller yerinde kalarak) mı yoksa **taşınarak** mı ayrıştırılacağını ve çıktının **güncel konuma** mı yoksa **seçeceğiniz başka bir klasöre** mi (`📂 Gözat...` veya `◫ Sağ Panel`) oluşturulacağını seçebilirsiniz.
+- Onayladığınızda dosyaları doğrudan klasöre dağıtmak yerine **`[Klasör adı] Tarihle Ayrıştırıldı`** ana klasörü altında **`Yıl\Yıl-Ay`** (örneğin `Captures Tarihle Ayrıştırıldı\2025\2025-08`) yapısına otomatik olarak yerleştirir.
 
 ### 7. Disk Alanı Analizi, Klasör Boyutları ve Kopya Dosya Bulucu
 
+- **Akıllı Tarama Önbelleği & Yeniden Tarama Önerisi:** Disk Analizi, Kopya Bulucu ve Klasör Boyutları bir kez çalıştıktan sonra SSD'de önbelleklenir ve sonraki açılışlarda diski yormadan **anında** açılır. Klasörlerde değişiklik algılandığında üst şeritte otomatik olarak **yeniden tarama önerisi** gösterilir (`Shift` + `📏 Boyutlar` veya **Canlı Tara** ile zorla güncellenebilir).
 - **Klasör Boyutları (`📏 Boyutlar`):** Klasör açılışını yavaşlatmamak için yalnızca siz istediğinizde alt klasörlerin gerçek boyutlarını hesaplar ve büyükten küçüğe sıralar.
 - **Disk İndeksleme (`⚡ İndeksle`) ve Anlık Arama:** Seçtiğiniz diski diski yormadan hızlıca dizine ekler; böylece _"Bu Klasör"_, _"Bu Disk"_ veya _"Tüm Diskler"_ kapsamında milisaniyeler içinde arama yapabilirsiniz.
 - **Disk Analizi (`📊 Analiz`):** Hangi dosya türlerinin diskinizi doldurduğunu, en büyük dosyaları ve en çok yer kaplayan klasörleri gösterir.
@@ -125,7 +133,11 @@ _"IMG_1050 ile IMG_1420 arasını seç"_, _"100 MB'tan büyük videoları bul"_ 
 | Kısayol                                  | İşlev                                                                     |
 | :--------------------------------------- | :------------------------------------------------------------------------ |
 | **`Space`**                              | Seçili dosya için Hızlı Önizleme (QuickLook) aç / kapat                   |
+| **`,` / `.`** _(Video Önizlemede)_       | Önceki / Sonraki video karesine adım at (`Shift`: 5'er kare atla)         |
+| **`S`** _(Önizlemede)_                   | Videonun o anki karesini tam çözünürlüklü JPEG olarak kaydet              |
 | **`B`**                                  | Seçilileri **Sepet**'e ekle / çıkar (önizlemede ekler ve sonrakine geçer) |
+| **`Ctrl+K`**                             | **Akıllı Komut & Hızlı Gezinti Paleti**'ni aç                             |
+| **`Ctrl+Shift+S`**                       | **Geçici Yüzen Raf**'ı aç / kapat                                         |
 | **`Del` / `Shift+Del`**                  | Geri Dönüşüm Kutusu'na taşı / Kalıcı olarak sil                           |
 | **`Ctrl+Z`**                             | Son dosya işlemini geri al                                                |
 | **`F3`**                                 | **Çift Panel**'i aç / kapat                                               |

@@ -9,6 +9,11 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo Tamamlandi! dist\LightDesktop.exe klasoru aciliyor...
-explorer /select,"%~dp0dist\LightDesktop.exe"
+tasklist /FI "IMAGENAME eq LightDesktop.exe" 2>NUL | find /I "LightDesktop.exe" >NUL
+if errorlevel 1 (
+  echo Tamamlandi! dist\LightDesktop.exe klasoru aciliyor...
+  explorer /select,"%~dp0dist\LightDesktop.exe"
+) else (
+  echo Tamamlandi! Guncel LightDesktop yeniden baslatildi.
+)
 pause

@@ -39,9 +39,44 @@ const undoStack = [];
 const MAX_UNDO_STACK = 50;
 let cachedUserSid = null;
 let lastKnownTrashCount = null;
+const dirMutationMap = new Map();
+
+function normalizeMutKey(p) {
+  const res = path.resolve(String(p || 'C:\\'));
+  return res.replace(/[\\/]+$/, '').toLowerCase() || res.toLowerCase();
+}
+
+function markDirMutated(p) {
+  if (!p) return;
+  try {
+    const resolved = path.resolve(String(p));
+    const now = Date.now();
+    dirMutationMap.set(normalizeMutKey(resolved), now);
+    const root = path.parse(resolved).root;
+    if (root) dirMutationMap.set(normalizeMutKey(root), now);
+  } catch {}
+}
+
+function markDirsMutated(dirs = []) {
+  for (const d of dirs) markDirMutated(d);
+}
+
+function getLastMutationFor(targetPath) {
+  if (!targetPath) return 0;
+  try {
+    const resolved = path.resolve(String(targetPath));
+    const t1 = dirMutationMap.get(normalizeMutKey(resolved)) || 0;
+    const root = path.parse(resolved).root;
+    const t2 = root ? (dirMutationMap.get(normalizeMutKey(root)) || 0) : 0;
+    return Math.max(t1, t2);
+  } catch {
+    return 0;
+  }
+}
 
 function pushUndoEntry(entry) {
   if (!entry || !entry.type) return null;
+  if (Array.isArray(entry.refreshDirs)) markDirsMutated(entry.refreshDirs);
   const normalized = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     time: Date.now(),
@@ -290,8 +325,7 @@ function getWarmRecycleWorker() {
 
   const workerScript = `
     $OutputEncoding = [System.Text.Encoding]::UTF8
-    [Console]::InputEncoding = [System.Text.Encoding]::UTF8
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    try { [Console]::InputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
     Add-Type -AssemblyName Microsoft.VisualBasic
     [Console]::Out.WriteLine('READY')
     [Console]::Out.Flush()
@@ -762,6 +796,29 @@ function readJsonBody(req) {
   });
 }
 
+function extractPowerShellStderr(rawStderr) {
+  const s = String(rawStderr || '').trim();
+  if (!s) return '';
+  if (!s.startsWith('#< CLIXML')) return s;
+  const parts = [];
+  const re = /<S S="Error">([\s\S]*?)<\/S>/gi;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const decoded = m[1]
+      .replace(/_x000D__x000A_/g, ' ')
+      .replace(/_x000A_/g, ' ')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .trim();
+    if (decoded) parts.push(decoded);
+  }
+  if (parts.length > 0) return parts.join(' ').trim();
+  return s.replace(/^#< CLIXML[\s\S]*/i, '').trim() || 'PowerShell betik hatası';
+}
+
 function runPowerShellEnv(script, envVars = {}, timeoutMs = 30000, useSta = false) {
   return new Promise((resolve, reject) => {
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
@@ -774,7 +831,7 @@ function runPowerShellEnv(script, envVars = {}, timeoutMs = 30000, useSta = fals
       { env: { ...process.env, ...envVars }, windowsHide: true, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
-          const cleanErr = String(stderr || '').trim()
+          const cleanErr = extractPowerShellStderr(stderr)
             || String(err.message || '').replace(/powershell\.exe[\s\S]*?-EncodedCommand\s+[A-Za-z0-9+/=]+/i, `PowerShell hatası (kod ${err.code || 1})`);
           return reject(new Error(cleanErr || `PowerShell hatası (kod ${err.code || 1})`));
         }
@@ -812,7 +869,7 @@ async function setOsFileClipboard(op, paths = []) {
 async function getOsFileClipboard() {
   const psScript = `
     $OutputEncoding = [System.Text.Encoding]::UTF8
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
     Add-Type -AssemblyName System.Windows.Forms
     $paths = @()
     $op = 'copy'
@@ -854,7 +911,7 @@ async function getDrives(force = false) {
   // Hızlı statfs fallback + PowerShell ile gerçek birim adlarını al (en fazla 4 sn bekle)
   const psScript = `
     $OutputEncoding = [System.Text.Encoding]::UTF8
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
     Get-CimInstance Win32_LogicalDisk | Select-Object DeviceID, VolumeName, DriveType, Size, FreeSpace | ConvertTo-Json -Compress
   `;
   let list = [];
@@ -1171,7 +1228,9 @@ function createTransferJob(opts = {}) {
     move: 'Dosyalar Taşınıyor',
     delete: opts.permanent ? 'Kalıcı Olarak Siliniyor' : "Geri Dönüşüm Kutusu'na Taşınıyor",
     batchRename: 'Toplu Yeniden Adlandırma',
-    organizeByDate: 'Tarihe Göre Klasörleniyor',
+    organizeByDate: opts.organizeMode === 'copy'
+      ? 'Tarihe Göre Kopyalanarak Klasörleniyor'
+      : 'Tarihe Göre Taşınarak Klasörleniyor',
   };
   const job = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -1180,6 +1239,8 @@ function createTransferJob(opts = {}) {
     sources: Array.isArray(opts.sources) ? opts.sources.map((s) => path.resolve(s)) : [],
     destDir: opts.destDir ? path.resolve(opts.destDir) : '',
     parentDir: opts.parentDir ? path.resolve(opts.parentDir) : '',
+    organizeMode: opts.organizeMode === 'copy' ? 'copy' : 'move',
+    outputFolderName: opts.outputFolderName || '',
     conflict: opts.conflict || 'rename',
     permanent: Boolean(opts.permanent),
     pattern: opts.pattern || '{name}_{n}',
@@ -1227,7 +1288,7 @@ async function runRecycleBinJob(job) {
 
   const psScript = `
     $OutputEncoding = [System.Text.Encoding]::UTF8
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
     Add-Type -AssemblyName Microsoft.VisualBasic
     $lines = [System.IO.File]::ReadAllLines($env:LD_DEL_FILE, [System.Text.Encoding]::UTF8)
     foreach ($p in $lines) {
@@ -1448,9 +1509,14 @@ async function processTransferQueue() {
           }
         } else if (nextJob.op === 'organizeByDate') {
           const parentDir = nextJob.parentDir;
+          const destBaseDir = nextJob.destDir || parentDir;
+          const outputFolderName = nextJob.outputFolderName || getOrganizeOutputFolderName(parentDir);
+          const outputRootDir = path.join(destBaseDir, outputFolderName);
+          const isCopy = nextJob.organizeMode === 'copy';
           const handle = await fsp.opendir(parentDir, { bufferSize: 128 });
           const files = [];
           const folderSet = new Set();
+          let totalBytes = 0;
           for await (const dirent of handle) {
             if (nextJob.cancelled) throw new Error('İptal edildi');
             if (dirent.isDirectory()) continue;
@@ -1462,16 +1528,26 @@ async function processTransferQueue() {
               const mm = `${yyyy}-${String(d.getMonth() + 1).padStart(2, '0')}`;
               const relFolder = path.join(yyyy, mm);
               folderSet.add(relFolder);
-              files.push({ src: fullPath, name: dirent.name, relFolder });
+              totalBytes += st.size || 0;
+              files.push({
+                src: fullPath,
+                name: dirent.name,
+                relFolder,
+                size: st.size || 0,
+                atime: st.atime,
+                mtime: st.mtime,
+              });
             } catch (err) {
               nextJob.errorCount++;
               recordAppError('Tarihle Klasörle', fullPath, err.message);
             }
           }
           nextJob.totalFiles = files.length;
+          nextJob.totalBytes = totalBytes;
           const createdDirs = [];
+          if (!fs.existsSync(outputRootDir)) createdDirs.push(outputRootDir);
           for (const relFolder of folderSet) {
-            const absSub = path.join(parentDir, relFolder);
+            const absSub = path.join(outputRootDir, relFolder);
             const absYear = path.dirname(absSub);
             if (!fs.existsSync(absYear)) createdDirs.push(absYear);
             if (!fs.existsSync(absSub)) createdDirs.push(absSub);
@@ -1480,16 +1556,38 @@ async function processTransferQueue() {
           const organizedPairs = [];
           for (const f of files) {
             await waitWhilePaused(nextJob);
-            const target = makeUniquePath(path.join(parentDir, f.relFolder, f.name));
+            const target = makeUniquePath(path.join(outputRootDir, f.relFolder, f.name));
             nextJob.currentFile = f.name;
-            nextJob.currentTarget = path.join(f.relFolder, path.basename(target));
+            nextJob.currentTarget = path.join(outputFolderName, f.relFolder, path.basename(target));
             try {
-              await fsp.rename(f.src, target);
-              idx.removeIndexedPath(f.src);
+              if (isCopy) {
+                await copyFileStreamSafe(f.src, target, nextJob);
+                await fsp.utimes(target, f.atime, f.mtime).catch(() => {});
+              } else {
+                const sameRoot = path.parse(f.src).root.toLowerCase() === path.parse(target).root.toLowerCase();
+                if (sameRoot) {
+                  await fsp.rename(f.src, target);
+                  idx.removeIndexedPath(f.src);
+                  nextJob.doneBytes += f.size || 0;
+                } else {
+                  await copyFileStreamSafe(f.src, target, nextJob);
+                  const [srcHash, destHash] = await Promise.all([
+                    computeQuickFileHash(f.src, f.size),
+                    computeQuickFileHash(target, f.size),
+                  ]);
+                  if (srcHash !== destHash) {
+                    await fsp.unlink(target).catch(() => {});
+                    throw new Error('Kopya bütünlük doğrulaması başarısız');
+                  }
+                  await fsp.utimes(target, f.atime, f.mtime).catch(() => {});
+                  await fsp.unlink(f.src);
+                  idx.removeIndexedPath(f.src);
+                }
+              }
               organizedPairs.push({ from: f.src, to: target });
               nextJob.doneFiles++;
               updateJobRate(nextJob);
-              pushJobLog(nextJob, f.name, `→ ${nextJob.currentTarget}`, 'ok');
+              pushJobLog(nextJob, f.name, `${isCopy ? '📋' : '→'} ${nextJob.currentTarget}`, 'ok');
             } catch (err) {
               nextJob.doneFiles++;
               nextJob.errorCount++;
@@ -1501,11 +1599,11 @@ async function processTransferQueue() {
           }
           if (organizedPairs.length > 0) {
             pushUndoEntry({
-              type: 'move',
-              label: `Tarihle Klasörle (${organizedPairs.length} öğe)`,
+              type: isCopy ? 'copy' : 'move',
+              label: `${isCopy ? 'Tarihle Kopyalayarak Klasörle' : 'Tarihle Taşıyarak Klasörle'} (${organizedPairs.length} öğe)`,
               items: organizedPairs,
               cleanupEmptyDirs: createdDirs,
-              refreshDirs: [parentDir],
+              refreshDirs: Array.from(new Set([parentDir, destBaseDir])),
             });
           }
         } else {
@@ -1667,6 +1765,16 @@ async function processTransferQueue() {
   }
 }
 
+function getOrganizeOutputFolderName(parentDir) {
+  const trimmed = String(parentDir || '').replace(/[\\/]+$/, '');
+  let base = path.basename(trimmed);
+  if (!base || /^[a-zA-Z]:$/.test(base)) {
+    base = trimmed.replace(/[^a-zA-Z0-9]/g, '') || 'Klasör';
+  }
+  base = base.replace(/[<>:"/\\|?*]/g, '_').trim() || 'Klasör';
+  return `${base} Tarihle Ayrıştırıldı`;
+}
+
 // ---------- Dosya Sistemi Eylemleri ----------
 async function handleFsAction(body) {
   const { action } = body;
@@ -1794,6 +1902,7 @@ async function handleFsAction(body) {
             await fsp.rm(resolved, { recursive: true, force: true });
             idx.removeIndexedPath(resolved);
           }
+          markDirsMutated(resolvedList.map((p) => path.dirname(p)));
         } else {
           const { okList, errList } = await sendPathsToRecycleBin(resolvedList);
           if (okList.length > 0) {
@@ -1825,12 +1934,44 @@ async function handleFsAction(body) {
     return { ok: true, queued: true, jobId: job.id, job };
   }
 
+  if (action === 'pickFolder') {
+    const initialDir = body.initialDir ? path.resolve(String(body.initialDir)) : '';
+    const out = await runPowerShellEnv(
+      `
+        $ProgressPreference = 'SilentlyContinue'
+        $OutputEncoding = [System.Text.Encoding]::UTF8
+        try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+        Add-Type -AssemblyName System.Windows.Forms
+        $owner = New-Object System.Windows.Forms.Form
+        $owner.TopMost = $true
+        $owner.ShowInTaskbar = $false
+        $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dlg.Description = 'Tarihle ayristirilan dosyalarin kaydedilecegi hedef klasoru secin'
+        $dlg.ShowNewFolderButton = $true
+        if ($env:LD_INIT_DIR -and (Test-Path -LiteralPath $env:LD_INIT_DIR -PathType Container)) {
+          $dlg.SelectedPath = $env:LD_INIT_DIR
+        }
+        if ($dlg.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
+          Write-Output $dlg.SelectedPath
+        }
+        $owner.Dispose()
+        exit 0
+      `,
+      { LD_INIT_DIR: initialDir },
+      120000,
+      true
+    );
+    return { ok: true, path: String(out || '').trim() };
+  }
+
   if (action === 'organizeByDate') {
     const parentDir = path.resolve(body.parentDir);
     const dryRun = Boolean(body.dryRun);
+    const outputFolderName = getOrganizeOutputFolderName(parentDir);
     if (dryRun) {
       const handle = await fsp.opendir(parentDir, { bufferSize: 128 });
       const files = [];
+      let totalBytes = 0;
       for await (const dirent of handle) {
         if (dirent.isDirectory()) continue;
         const fullPath = path.join(parentDir, dirent.name);
@@ -1840,6 +1981,7 @@ async function handleFsAction(body) {
           const yyyy = String(d.getFullYear());
           const mm = `${yyyy}-${String(d.getMonth() + 1).padStart(2, '0')}`;
           const relFolder = path.join(yyyy, mm);
+          totalBytes += st.size || 0;
           files.push({ src: fullPath, name: dirent.name, relFolder });
         } catch {}
       }
@@ -1852,12 +1994,21 @@ async function handleFsAction(body) {
       const preview = Array.from(folderMap.entries())
         .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([folder, count]) => ({ folder, count }));
-      return { ok: true, totalFiles: files.length, folderCount: folderMap.size, preview };
+      return { ok: true, totalFiles: files.length, totalBytes, folderCount: folderMap.size, preview, outputFolderName };
+    }
+
+    const mode = body.mode === 'copy' ? 'copy' : 'move';
+    const destBaseDir = body.destDir ? path.resolve(String(body.destDir)) : parentDir;
+    if (!fs.existsSync(destBaseDir) || !fs.statSync(destBaseDir).isDirectory()) {
+      throw new Error('Hedef klasör bulunamadı');
     }
 
     const job = createTransferJob({
       op: 'organizeByDate',
       parentDir,
+      destDir: destBaseDir,
+      organizeMode: mode,
+      outputFolderName,
     });
     processTransferQueue();
     return { ok: true, queued: true, jobId: job.id, job };
@@ -2293,32 +2444,154 @@ const server = http.createServer(async (req, res) => {
         ws.on('finish', resolve);
         req.pipe(ws);
       });
+      markDirMutated(resolvedDir);
       return sendJson(res, 200, { ok: true, path: destPath });
+    }
+
+    if (pathname === '/api/storyboard' && req.method === 'GET') {
+      const filePath = url.searchParams.get('path');
+      if (!filePath) return sendJson(res, 400, { error: 'path gerekli' });
+      try {
+        const sb = await idx.getOrCreateVideoStoryboard(filePath);
+        if (!sb || !sb.available || !sb.filePath) {
+          res.writeHead(204);
+          return res.end();
+        }
+        res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' });
+        pipeFileStream(req, res, sb.filePath);
+      } catch {
+        if (!res.headersSent && !res.writableEnded) {
+          res.writeHead(204);
+          res.end();
+        }
+      }
+      return;
+    }
+
+    if (pathname === '/api/media/save-frame' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const videoPath = body.videoPath ? path.resolve(String(body.videoPath)) : '';
+      const dataUrl = String(body.dataUrl || '');
+      const m = /^data:image\/(jpeg|jpg|png);base64,(.+)$/i.exec(dataUrl);
+      if (!videoPath || !m) return sendJson(res, 400, { error: 'Geçersiz kare verisi' });
+      let destDir = path.dirname(videoPath);
+      if (body.saveDir && String(body.saveDir).trim()) {
+        const candDir = path.resolve(String(body.saveDir).trim());
+        await fsp.mkdir(candDir, { recursive: true });
+        destDir = candDir;
+      }
+      const stem = path.parse(videoPath).name;
+      const secs = Math.max(0, Math.floor(Number(body.timeSec) || 0));
+      const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+      const ss = String(secs % 60).padStart(2, '0');
+      const ext = m[1].toLowerCase() === 'png' ? '.png' : '.jpg';
+      const target = makeUniquePath(path.join(destDir, `${stem}_kare_${mm}m${ss}s${ext}`));
+      await fsp.writeFile(target, Buffer.from(m[2], 'base64'));
+      markDirMutated(destDir);
+      return sendJson(res, 200, { ok: true, savedPath: target });
+    }
+
+    if (pathname === '/api/media/trim-video' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const srcPath = body.path ? path.resolve(String(body.path)) : '';
+      const startSec = Number(body.startSec);
+      const endSec = Number(body.endSec);
+      if (!srcPath || !fs.existsSync(srcPath)) return sendJson(res, 404, { error: 'Video dosyası bulunamadı' });
+      if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec + 0.1 || startSec < 0) {
+        return sendJson(res, 400, { error: 'Geçersiz kırpma aralığı (Bitiş > Başlangıç olmalı)' });
+      }
+      const ffmpegBin = idx.getFfmpegBin();
+      if (!ffmpegBin) {
+        return sendJson(res, 400, { error: 'Kayıpsız video kırpmak için sistemde FFmpeg (C:\\ffmpeg\\bin\\ffmpeg.exe veya PATH) bulunamadı.' });
+      }
+      const pInfo = path.parse(srcPath);
+      let destDir = pInfo.dir;
+      if (body.saveDir && String(body.saveDir).trim()) {
+        const candDir = path.resolve(String(body.saveDir).trim());
+        await fsp.mkdir(candDir, { recursive: true });
+        destDir = candDir;
+      }
+      const outPath = makeUniquePath(path.join(destDir, `${pInfo.name}_kirpildi${pInfo.ext || '.mp4'}`));
+      await new Promise((resolve, reject) => {
+        execFile(
+          ffmpegBin,
+          ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-ss', startSec.toFixed(2), '-to', endSec.toFixed(2), '-i', srcPath, '-c', 'copy', '-avoid_negative_ts', 'make_zero', outPath],
+          { timeout: 120000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+          (err, _stdout, stderr) => {
+            if (err) {
+              try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch {}
+              return reject(new Error(String(stderr || err.message || 'Video kırpılamadı').trim()));
+            }
+            resolve();
+          }
+        );
+      });
+      markDirMutated(destDir);
+      return sendJson(res, 200, { ok: true, savedPath: outPath });
+    }
+
+    if (pathname === '/api/smart-view' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const data = idx.querySmartView(body.criteria || {});
+      return sendJson(res, 200, { ok: true, ...data });
     }
 
     if (pathname === '/api/analyze' && req.method === 'GET') {
       const targetPath = url.searchParams.get('path');
       const mode = url.searchParams.get('mode') || 'auto';
       if (!targetPath) return sendJson(res, 400, { error: 'path gerekli' });
-      let result = null;
       if (mode !== 'live') {
-        const cached = idx.analyzeFromCache(targetPath);
-        if (cached.totalFiles > 0 || mode === 'cached') {
-          result = cached;
+        const hit = idx.getAnalysisCache('analyze', targetPath, getLastMutationFor(targetPath));
+        if (hit && hit.data) {
+          return sendJson(res, 200, {
+            ...hit.data,
+            fromCache: true,
+            cachedAt: hit.cachedAt,
+            stale: hit.stale,
+            staleReason: hit.staleReason,
+          });
         }
+      }
+      let result = null;
+      if (mode === 'cached') {
+        result = idx.analyzeFromCache(targetPath);
+      } else if (mode !== 'live') {
+        const sqliteCached = idx.analyzeFromCache(targetPath);
+        if (sqliteCached.totalFiles > 0) result = sqliteCached;
       }
       if (!result) {
         result = await idx.analyzeLive(targetPath);
       }
-      return sendJson(res, 200, result);
+      if (result && !result.cancelled && result.totalFiles > 0) {
+        idx.setAnalysisCache('analyze', targetPath, result);
+      }
+      return sendJson(res, 200, { ...result, fromCache: false, cachedAt: Date.now(), stale: false, staleReason: '' });
     }
 
     if (pathname === '/api/folder-sizes' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const paths = Array.isArray(body.paths) ? body.paths : [];
+      if (!body.force && body.parentDir) {
+        const hit = idx.getAnalysisCache('folder_sizes', body.parentDir, getLastMutationFor(body.parentDir));
+        if (hit && hit.data && hit.data.sizes) {
+          const allMatched = paths.every((p) => Object.prototype.hasOwnProperty.call(hit.data.sizes, p));
+          if (allMatched) {
+            return sendJson(res, 200, {
+              ...hit.data,
+              fromCache: true,
+              cachedAt: hit.cachedAt,
+              stale: hit.stale,
+              staleReason: hit.staleReason,
+            });
+          }
+        }
+      }
       const data = await idx.calculateFolderSizes(body.parentDir, paths);
       if (res.writableEnded || res.destroyed) return;
-      return sendJson(res, 200, data);
+      if (data && !data.cancelled && body.parentDir) {
+        idx.setAnalysisCache('folder_sizes', body.parentDir, data);
+      }
+      return sendJson(res, 200, { ...data, fromCache: false, cachedAt: Date.now(), stale: false, staleReason: '' });
     }
 
     if (pathname === '/api/folder-sizes/cancel' && req.method === 'POST') {
@@ -2327,9 +2600,25 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/duplicates' && req.method === 'GET') {
       const targetPath = url.searchParams.get('path');
+      const force = url.searchParams.get('force') === '1';
       if (!targetPath) return sendJson(res, 400, { error: 'path gerekli' });
+      if (!force) {
+        const hit = idx.getAnalysisCache('duplicates', targetPath, getLastMutationFor(targetPath));
+        if (hit && hit.data) {
+          return sendJson(res, 200, {
+            ...hit.data,
+            fromCache: true,
+            cachedAt: hit.cachedAt,
+            stale: hit.stale,
+            staleReason: hit.staleReason,
+          });
+        }
+      }
       const data = await idx.findDuplicates(targetPath);
-      return sendJson(res, 200, data);
+      if (data && !data.cancelled) {
+        idx.setAnalysisCache('duplicates', targetPath, data);
+      }
+      return sendJson(res, 200, { ...data, fromCache: false, cachedAt: Date.now(), stale: false, staleReason: '' });
     }
 
     if (pathname === '/api/index/start' && req.method === 'POST') {

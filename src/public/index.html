@@ -23,6 +23,8 @@
           <span class="dot"></span>
           <span id="index-pill-text">İndeks Hazır</span>
         </span>
+        <button id="btn-cmd-palette" class="mini-pill-btn" title="Akıllı Komut &amp; Gezinti Paleti (Ctrl+K)">⌘ Komutlar</button>
+        <button id="btn-toggle-shelf" class="mini-pill-btn" title="Geçici Yüzen Raf (Ctrl+Shift+S)">🧲 Raf</button>
         <button id="btn-toggle-index" class="mini-pill-btn" title="Aktif Sürücüyü Arka Planda Hızlı İndeksle">⚡ İndeksle</button>
         <button id="btn-install-shortcut" class="mini-pill-btn" title="Masaüstü Kısayolu ve Windows Sağ Tık Menüsü Ekle">📌 Kısayol Kur</button>
         <button id="btn-settings" class="mini-pill-btn" title="Uygulama Ayarları (Ctrl+,)">⚙️ Ayarlar</button>
@@ -148,6 +150,14 @@
           </div>
 
           <div class="sidebar-section">
+            <button type="button" id="btn-toggle-smart-views" class="sidebar-title sidebar-collapse-btn" title="İndeksten anlık çalışan kayıtlı sanal klasörler">
+              <span id="sb-smart-views-chevron">▾</span>
+              <span>✨ Akıllı Klasörler (<span id="sb-smart-views-count">0</span>)</span>
+            </button>
+            <div id="sb-smart-views-list" class="sb-smart-views-list"></div>
+          </div>
+
+          <div class="sidebar-section">
             <button type="button" id="btn-toggle-recent-targets" class="sidebar-title sidebar-collapse-btn" title="Son dosya taşınan veya kopyalanan 15 yolu aç/kapat">
               <span id="sb-recent-targets-chevron">▾</span>
               <span>🕒 Son Erişilen Yollar (<span id="sb-recent-targets-count">0</span>)</span>
@@ -264,6 +274,7 @@
               <button id="btn-flt-move-folder" class="cmd-btn">📁 Yeni Klasöre Taşı</button>
               <button id="btn-flt-copy" class="cmd-btn">📋 Kopyala</button>
               <button id="btn-flt-delete" class="cmd-btn danger-hover">🗑️ Sil</button>
+              <button id="btn-studio-save-smart" class="cmd-btn accent-outline" title="Bu filtreyi sol menüye Akıllı Klasör olarak kaydet">💾 Akıllı Klasör Kaydet</button>
             </div>
           </div>
         </section>
@@ -331,6 +342,7 @@
             <span>Disk yorulmadan sıralı olarak taranıyor...</span>
           </div>
           <div id="analyzer-content">
+            <div id="analyzer-cache-banner" class="cache-status-banner hidden"></div>
             <div id="stacked-bar" class="stacked-bar"></div>
             <div id="category-cards" class="category-cards"></div>
             <div id="dupes-panel" class="analyzer-panel hidden" style="margin-bottom:14px;"></div>
@@ -358,6 +370,16 @@
               <button id="btn-trash-restore" class="cmd-btn primary" disabled>♻️ Seçilenleri Geri Yükle</button>
               <button id="btn-trash-perm-delete" class="cmd-btn danger-hover" disabled>🔥 Kalıcı Sil</button>
               <button id="btn-trash-empty" class="cmd-btn danger-hover">🧹 Çöp Kutusunu Boşalt</button>
+            </div>
+          </div>
+          <div id="smart-view-bar" class="smart-view-bar hidden">
+            <div class="smart-view-bar-left">
+              <strong id="smart-view-title">✨ Akıllı Klasör</strong>
+              <span id="smart-view-summary" class="muted-text"></span>
+            </div>
+            <div class="smart-view-bar-actions">
+              <button type="button" id="btn-smart-view-refresh" class="cmd-btn">🔄 Yenile</button>
+              <button type="button" id="btn-smart-view-close" class="cmd-btn">✕ Çık</button>
             </div>
           </div>
           <div id="related-bar" class="related-bar hidden">
@@ -511,6 +533,10 @@
         <div class="cmd-sep"></div>
         <button id="btn-ql-prev" class="cmd-btn">◀ Önceki</button>
         <button id="btn-ql-next" class="cmd-btn">Sonraki ▶</button>
+        <button id="btn-ql-frame-prev" class="cmd-btn hidden" title="Önceki Kare (,) • Shift: 5 kare geri">⏮ Kare</button>
+        <button id="btn-ql-frame-next" class="cmd-btn hidden" title="Sonraki Kare (.) • Shift: 5 kare ileri">Kare ⏭</button>
+        <button id="btn-ql-capture" class="cmd-btn hidden" title="O anki video karesini görüntü olarak kaydet (S)">📸 Kare Al (S)</button>
+        <button id="btn-ql-trim-toggle" class="cmd-btn hidden" title="FFmpeg ile kayıpsız A-B video kırpma">✂️ Kırp</button>
         <button id="btn-ql-related" class="cmd-btn" title="Bu dosya ile aynı gün/saat veya benzer isimli tüm dosyaları bul">✨ Benzerlerini Bul</button>
         <button id="btn-ql-reveal" class="cmd-btn" title="Dosyanın Bulunduğu Klasörü Aç">📂 Bulunduğu Yeri Aç</button>
         <button id="btn-ql-open-ext" class="cmd-btn primary">Varsayılan Uygulamada Aç</button>
@@ -523,6 +549,40 @@
       <div id="ql-basket-badge" class="ql-basket-badge hidden" title="Bu öğe sepette">🧺 <span class="basket-check">✓</span> Sepette</div>
       <button type="button" id="btn-ql-stage-next" class="ql-nav-btn next" title="Sonraki (→)" aria-label="Sonraki">›</button>
     </div>
+    <div id="ql-trim-bar" class="ql-trim-bar hidden">
+      <div class="ql-trim-timeline-wrap">
+        <span id="ql-trim-time-min" class="ql-trim-edge-time">00:00</span>
+        <div id="ql-trim-track" class="ql-trim-track" title="Videoda konuma gitmek için tıklayın; A/B tutamaçlarını sürükleyin">
+          <div id="ql-trim-selection" class="ql-trim-selection"></div>
+          <div id="ql-trim-playhead" class="ql-trim-playhead"></div>
+          <div id="ql-trim-handle-a" class="ql-trim-handle handle-a" title="Başlangıç (A) sürükle">A</div>
+          <div id="ql-trim-handle-b" class="ql-trim-handle handle-b" title="Bitiş (B) sürükle">B</div>
+        </div>
+        <span id="ql-trim-time-max" class="ql-trim-edge-time">00:00</span>
+      </div>
+      <div class="ql-trim-controls-row">
+        <div class="ql-trim-pill-group">
+          <div class="ql-trim-chip">
+            <span class="trim-tag tag-a">A</span>
+            <span id="ql-trim-start-fmt" class="trim-time-code">00:00.0</span>
+            <input type="number" id="ql-trim-start" step="0.1" min="0" value="0" title="Başlangıç saniyesi" />
+            <button type="button" id="btn-ql-set-start" class="ql-trim-btn" title="Videonun şu anki saniyesini A yap">⏱ Şu Anı A Yap</button>
+          </div>
+          <div class="ql-trim-chip">
+            <span class="trim-tag tag-b">B</span>
+            <span id="ql-trim-end-fmt" class="trim-time-code">00:00.0</span>
+            <input type="number" id="ql-trim-end" step="0.1" min="0" value="0" title="Bitiş saniyesi" />
+            <button type="button" id="btn-ql-set-end" class="ql-trim-btn" title="Videonun şu anki saniyesini B yap">⏱ Şu Anı B Yap</button>
+          </div>
+        </div>
+        <div class="ql-trim-actions-group">
+          <span id="ql-trim-duration" class="ql-trim-dur-badge">Seçili: —</span>
+          <button type="button" id="btn-ql-trim-preview" class="ql-trim-btn" title="Seçili A–B aralığını oynat">▶ Seçimi Oynat</button>
+          <button type="button" id="btn-ql-trim-run" class="cmd-btn primary">✂️ Kayıpsız Kırp &amp; Kaydet</button>
+          <button type="button" id="btn-ql-trim-close" class="icon-btn small" title="Kırpma Çubuğunu Kapat">✕</button>
+        </div>
+      </div>
+    </div>
   </dialog>
 
   <!-- Genel İşlem / Toplu Yeniden Adlandırma Modalı -->
@@ -534,6 +594,63 @@
       <div class="prompt-buttons">
         <button type="button" id="btn-prompt-cancel" class="cmd-btn">İptal</button>
         <button type="submit" id="btn-prompt-ok" class="cmd-btn primary">Onayla</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Tarihe Göre Klasörleme Seçenekleri Modalı -->
+  <dialog id="organize-date-dialog" class="modal-dialog org-date-dialog" closedby="any" aria-labelledby="org-date-title">
+    <form method="dialog" id="org-date-form">
+      <h3 id="org-date-title">📅 Tarihe Göre Klasörle</h3>
+      <p id="org-date-summary" class="muted-text"></p>
+
+      <div class="org-section-label">1. İşlem Türü</div>
+      <div class="org-radio-grid">
+        <label class="org-radio-card">
+          <input type="radio" name="org-mode" value="copy" checked />
+          <div>
+            <strong>📋 Kopyalayarak klasörle</strong>
+            <div class="muted-text">Orijinal dosyalar olduğu yerde kalır, kopyaları ayrıştırılır</div>
+          </div>
+        </label>
+        <label class="org-radio-card">
+          <input type="radio" name="org-mode" value="move" />
+          <div>
+            <strong>📦 Taşıyarak klasörle</strong>
+            <div class="muted-text">Orijinal dosyalar mevcut konumdan ayrıştırılarak taşınır</div>
+          </div>
+        </label>
+      </div>
+
+      <div class="org-section-label">2. Hedef Konum</div>
+      <div class="org-radio-grid">
+        <label class="org-radio-card">
+          <input type="radio" name="org-dest-mode" value="current" checked />
+          <div>
+            <strong>📍 Buraya (Güncel Konuma)</strong>
+            <div id="org-current-path-label" class="muted-text org-path-sub"></div>
+          </div>
+        </label>
+        <label class="org-radio-card">
+          <input type="radio" name="org-dest-mode" value="custom" />
+          <div>
+            <strong>📂 Başka Konum Seç</strong>
+            <div class="muted-text">Bilgisayardan başka bir hedef klasör belirleyin</div>
+          </div>
+        </label>
+      </div>
+
+      <div id="org-custom-dest-row" class="org-dest-row hidden">
+        <input id="org-custom-dest-input" type="text" spellcheck="false" placeholder="Hedef ana klasör yolu (örn. D:\Arsiv)" />
+        <button type="button" id="btn-org-browse" class="cmd-btn">📂 Gözat...</button>
+        <button type="button" id="btn-org-use-dual" class="cmd-btn hidden">◫ Sağ Panel</button>
+      </div>
+
+      <div id="org-output-preview" class="org-preview-box"></div>
+
+      <div class="prompt-buttons">
+        <button type="button" id="btn-org-cancel" class="cmd-btn">İptal</button>
+        <button type="submit" id="btn-org-ok" class="cmd-btn primary">Klasörlemeyi Başlat</button>
       </div>
     </form>
   </dialog>
@@ -677,7 +794,7 @@
       <button type="button" id="btn-settings-close" class="icon-btn">✕</button>
     </div>
 
-    <div class="settings-body">
+    <div class="settings-body settings-body-grid">
       <div class="settings-group">
         <div class="settings-group-title">🎨 Görünüm &amp; Tema</div>
         <div class="settings-row">
@@ -754,7 +871,7 @@
       </div>
 
       <div class="settings-group">
-        <div class="settings-group-title">⚡ Davranış &amp; Gezinti</div>
+        <div class="settings-group-title">📂 Yollar &amp; Kayıt Konumları</div>
         <div class="settings-row">
           <div class="settings-label-wrap">
             <strong>Açılışta Başlangıç Konumu</strong>
@@ -766,13 +883,97 @@
             <option value="custom">📂 Özel klasör yolu</option>
           </select>
         </div>
-        <div id="set-startup-custom-row" class="settings-row hidden">
+        <div id="set-startup-custom-row" class="settings-row settings-path-row hidden">
           <div class="settings-label-wrap">
             <strong>Özel Başlangıç Yolu</strong>
             <span class="muted-text">Örn: D:\Videolar veya C:\Users\mrtcn\Desktop</span>
           </div>
-          <input type="text" id="set-startup-path" spellcheck="false" style="width:240px" placeholder="D:\" />
+          <div class="settings-path-input-wrap">
+            <input type="text" id="set-startup-path" spellcheck="false" placeholder="D:\" />
+            <button type="button" id="btn-set-startup-browse" class="cmd-btn">📂 Gözat...</button>
+          </div>
         </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Video Kare Yakalama (📸 Kare Al) Konumu</strong>
+            <span class="muted-text">Videodan alınan kare fotoğrafın kaydedileceği yer</span>
+          </div>
+          <select id="set-frame-save-mode">
+            <option value="same">📂 Videonun bulunduğu klasöre kaydet</option>
+            <option value="custom">📁 Özel klasör seç...</option>
+          </select>
+        </div>
+        <div id="set-frame-save-custom-row" class="settings-row settings-path-row hidden">
+          <div class="settings-label-wrap">
+            <strong>Kare Fotoğraf Kayıt Klasörü</strong>
+            <span class="muted-text">Örn: C:\Users\mrtcn\Pictures\YakalananKareler</span>
+          </div>
+          <div class="settings-path-input-wrap">
+            <input type="text" id="set-frame-save-dir" spellcheck="false" placeholder="Klasör yolu..." />
+            <button type="button" id="btn-set-frame-save-browse" class="cmd-btn">📂 Gözat...</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Video Kırpma (✂️ Kırp) Kayıt Konumu</strong>
+            <span class="muted-text">Kırpılan videoların varsayılan kaydedileceği yer</span>
+          </div>
+          <select id="set-trim-save-mode">
+            <option value="same">📂 Videonun bulunduğu klasöre kaydet</option>
+            <option value="custom">📁 Özel klasör seç...</option>
+          </select>
+        </div>
+        <div id="set-trim-save-custom-row" class="settings-row settings-path-row hidden">
+          <div class="settings-label-wrap">
+            <strong>Kırpılan Video Kayıt Klasörü</strong>
+            <span class="muted-text">Örn: C:\Users\mrtcn\Videos\Kirpilanlar</span>
+          </div>
+          <div class="settings-path-input-wrap">
+            <input type="text" id="set-trim-save-dir" spellcheck="false" placeholder="Klasör yolu..." />
+            <button type="button" id="btn-set-trim-save-browse" class="cmd-btn">📂 Gözat...</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">🎬 Medya, Önizleme &amp; HDD Koruması</div>
+        <div class="settings-row">
+          <div class="settings-label-wrap">
+            <strong>Varsayılan Kapak Resmi (Thumbnail) Modu</strong>
+            <span class="muted-text">HDD sağlığı için açılışta seçilecek kapak yükleme modu</span>
+          </div>
+          <select id="set-default-thumb">
+            <option value="off">Kapalı (0 Yük)</option>
+            <option value="selected">Sadece Seçililer</option>
+            <option value="viewport">Ekrandakiler (Sıralı)</option>
+            <option value="all">Tüm Klasör (Sıralı)</option>
+          </select>
+        </div>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>Fotoğraf, GIF ve videolara çift tıklayınca dahili oynatıcıda aç</strong>
+            <span class="muted-text">Kapalıysa doğrudan Windows varsayılan uygulaması açılır</span>
+          </div>
+          <input type="checkbox" id="set-dblclick-quicklook" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>QuickLook'ta videoları otomatik oynat</strong>
+            <span class="muted-text">Space veya çift tıkla açılan video hemen başlar</span>
+          </div>
+          <input type="checkbox" id="set-video-autoplay" />
+        </label>
+        <label class="settings-row settings-check">
+          <div class="settings-label-wrap">
+            <strong>QuickLook'ta videoları döngüye al (Loop)</strong>
+            <span class="muted-text">Kısa videolar bitince otomatik başa sarar</span>
+          </div>
+          <input type="checkbox" id="set-video-loop" />
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">⚡ Davranış &amp; Gezinti</div>
         <div class="settings-row">
           <div class="settings-label-wrap">
             <strong>Öğe Açma Modu</strong>
@@ -800,36 +1001,6 @@
             <span class="muted-text">Taşıma / kopyalama %100 tamamlanınca pencere kendiliğinden kapanır</span>
           </div>
           <input type="checkbox" id="set-auto-close-proc" />
-        </label>
-      </div>
-
-      <div class="settings-group">
-        <div class="settings-group-title">🎬 Medya, Önizleme &amp; HDD Koruması</div>
-        <div class="settings-row">
-          <div class="settings-label-wrap">
-            <strong>Varsayılan Kapak Resmi (Thumbnail) Modu</strong>
-            <span class="muted-text">HDD sağlığı için açılışta seçilecek kapak yükleme modu</span>
-          </div>
-          <select id="set-default-thumb">
-            <option value="off">Kapalı (0 Yük)</option>
-            <option value="selected">Sadece Seçililer</option>
-            <option value="viewport">Ekrandakiler (Sıralı)</option>
-            <option value="all">Tüm Klasör (Sıralı)</option>
-          </select>
-        </div>
-        <label class="settings-row settings-check">
-          <div class="settings-label-wrap">
-            <strong>QuickLook'ta videoları otomatik oynat</strong>
-            <span class="muted-text">Space veya çift tıkla açılan video hemen başlar</span>
-          </div>
-          <input type="checkbox" id="set-video-autoplay" />
-        </label>
-        <label class="settings-row settings-check">
-          <div class="settings-label-wrap">
-            <strong>QuickLook'ta videoları döngüye al (Loop)</strong>
-            <span class="muted-text">Kısa videolar bitince otomatik başa sarar</span>
-          </div>
-          <input type="checkbox" id="set-video-loop" />
         </label>
       </div>
 
@@ -988,6 +1159,37 @@
       </div>
     </div>
   </dialog>
+
+  <!-- Akıllı Komut & Hızlı Gezinti Paleti (Ctrl+K) -->
+  <dialog id="command-palette-dialog" class="modal-dialog cmd-palette-dialog" closedby="any" aria-label="Akıllı Komut Paleti">
+    <div class="cmd-palette-head">
+      <span>⌘</span>
+      <input id="cmd-palette-input" type="text" spellcheck="false" autocomplete="off" placeholder="Komut çalıştır, klasöre git veya filtre yaz (örn: > 100mb video, bugün, analiz)..." />
+      <span class="muted-text" style="font-size:11px;">ESC</span>
+    </div>
+    <div id="cmd-palette-list" class="cmd-palette-list"></div>
+  </dialog>
+
+  <!-- Geçici Yüzen Raf (Drag Shelf) -->
+  <div id="drag-shelf" class="drag-shelf hidden">
+    <div class="drag-shelf-head">
+      <strong>🧲 Geçici Raf (<span id="drag-shelf-count">0</span>)</strong>
+      <div style="display:flex;gap:4px;">
+        <button type="button" id="btn-shelf-clear" class="mini-pill-btn" title="Rafı Temizle">🧹</button>
+        <button type="button" id="btn-shelf-close" class="mini-pill-btn" title="Rafı Gizle">✕</button>
+      </div>
+    </div>
+    <div id="drag-shelf-list" class="drag-shelf-list">
+      <div class="drag-shelf-empty muted-text">Dosyaları buraya sürükleyip başka klasörde tek hamlede bırakabilirsiniz.</div>
+    </div>
+    <div class="drag-shelf-footer">
+      <div id="drag-shelf-drag-handle" class="drag-shelf-handle hidden" draggable="true" title="Raftaki tüm dosyaları hedef klasöre veya masaüstüne sürükle">🧲 Tümünü Sürükle</div>
+      <div class="drag-shelf-btns">
+        <button type="button" id="btn-shelf-move-here" class="cmd-btn small primary" disabled title="Raftakileri açık klasöre taşı">📦 Buraya Taşı</button>
+        <button type="button" id="btn-shelf-copy-here" class="cmd-btn small" disabled title="Raftakileri açık klasöre kopyala">📋 Kopyala</button>
+      </div>
+    </div>
+  </div>
 
   <div id="col-filter-popover" class="col-filter-popover" popover="manual" role="menu"></div>
   <div id="toast-container" class="toast-container"></div>

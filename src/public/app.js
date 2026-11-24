@@ -100,8 +100,11 @@ const state = {
   dualOpen: false,
   dualPath: '',
   dualItems: [],
+  dualSelectedPaths: new Set(),
+  dualLastClickedIdx: -1,
   dualHistory: [],
   dualHistoryIdx: -1,
+  activePane: 'left',
 
   // Çöp Kutusu & Geri Al (Ctrl+Z)
   trashCount: 0,
@@ -113,6 +116,13 @@ const state = {
   recentTransferTargets: [], // En son dosya taşınan/kopyalanan max 15 hedef klasör (LRU)
   recentTargetsOpen: true,
   dashSections: { quick: true, folders: true, files: true },
+
+  // Akıllı Klasörler (Sanal Görünüm) & Geçici Yüzen Raf
+  smartViews: [],
+  smartViewsOpen: true,
+  smartViewCtx: null,
+  shelfItems: new Map(),
+  shelfPinned: false,
 
   // Uygulama Ayarları
   settings: {
@@ -129,6 +139,11 @@ const state = {
     trashConfirmMode: 'bulk', // bulk | always | never
     autoCloseProcessModal: false,
     defaultThumbMode: 'off',
+    dblClickQuickLook: true,
+    frameSaveMode: 'same', // same | custom
+    frameSaveDir: '',
+    trimSaveMode: 'same', // same | custom
+    trimSaveDir: '',
     videoAutoplay: true,
     videoLoop: false,
   },
@@ -445,7 +460,10 @@ async function navigateTo(targetPath, { pushHistory = true, forceRefresh = false
   if (!isSameTarget || pushHistory) {
     state.filterOnlyMatched = false;
     state.relatedCtx = null;
+    state.smartViewCtx = null;
     $('related-bar')?.classList.add('hidden');
+    $('smart-view-bar')?.classList.add('hidden');
+    renderSmartViewsSidebar();
     for (const set of Object.values(state.colFilters)) set.clear();
     closeColFilterPopover();
     updateListHeaderIndicators();
@@ -821,7 +839,196 @@ function renderRecentTransferTargets() {
   }
 }
 
+const DEFAULT_SMART_VIEWS = [
+  { id: 'sv_vid_7d', icon: '🎬', name: 'Son 7 Gün Videoları', builtin: true, criteria: { category: 'video', withinDays: 7, sortBy: 'mtime' } },
+  { id: 'sv_big_500mb', icon: '🐘', name: '500 MB+ Büyük Dosyalar', builtin: true, criteria: { minSize: 500 * 1024 * 1024, sortBy: 'size' } },
+  { id: 'sv_img_30d', icon: '🖼️', name: 'Bu Ay Fotoğrafları', builtin: true, criteria: { category: 'image', withinDays: 30, sortBy: 'mtime' } },
+];
+
+function loadSmartViews() {
+  let saved = null;
+  try {
+    const raw = JSON.parse(localStorage.getItem('ld_smart_views') || 'null');
+    if (Array.isArray(raw) && raw.length > 0) saved = raw;
+  } catch {}
+  state.smartViews = saved || DEFAULT_SMART_VIEWS.map((x) => ({ ...x, criteria: { ...x.criteria } }));
+  try {
+    const openFlag = localStorage.getItem('ld_smart_views_open');
+    if (openFlag === '0') state.smartViewsOpen = false;
+  } catch {}
+}
+
+function saveSmartViews() {
+  try {
+    localStorage.setItem('ld_smart_views', JSON.stringify(state.smartViews || []));
+  } catch {}
+}
+
+function renderSmartViewsSidebar() {
+  const listEl = $('sb-smart-views-list');
+  const cntEl = $('sb-smart-views-count');
+  const chevEl = $('sb-smart-views-chevron');
+  if (!listEl) return;
+  const views = state.smartViews || [];
+  if (cntEl) cntEl.textContent = String(views.length);
+  if (chevEl) chevEl.textContent = state.smartViewsOpen ? '▾' : '▸';
+  listEl.classList.toggle('hidden', !state.smartViewsOpen);
+  listEl.innerHTML = '';
+
+  for (const sv of views) {
+    const row = document.createElement('div');
+    row.className = `sb-smart-view-item${state.smartViewCtx && state.smartViewCtx.id === sv.id ? ' active' : ''}`;
+    row.title = sv.name;
+    row.innerHTML = `
+      <span>${esc(sv.icon || '✨')}</span>
+      <span class="sb-smart-view-name">${esc(sv.name)}</span>
+    `;
+    row.onclick = () => openSmartView(sv);
+    row.oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showCustomContextMenu(e, [
+        { label: '✨ Akıllı Klasörü Aç', bold: true, onClick: () => openSmartView(sv) },
+        !sv.builtin ? { label: '🗑️ Akıllı Klasörden Kaldır', danger: true, onClick: () => {
+          state.smartViews = state.smartViews.filter((x) => x.id !== sv.id);
+          saveSmartViews();
+          renderSmartViewsSidebar();
+          if (state.smartViewCtx && state.smartViewCtx.id === sv.id) closeSmartView();
+        } } : null,
+      ]);
+    };
+    listEl.appendChild(row);
+  }
+}
+
+async function openSmartView(sv) {
+  if (!sv) return;
+  const tab = getActiveTab();
+  if (!tab) return;
+  try {
+    cancelPendingThumbs();
+    state.thumbSessionId++;
+    state.selectedPaths.clear();
+    state.lastClickedIndex = -1;
+    state.filterOnlyMatched = false;
+    state.relatedCtx = null;
+    state.smartViewCtx = sv;
+    $('related-bar')?.classList.add('hidden');
+
+    tab.viewType = 'explorer';
+    $('analyzer-view').classList.add('hidden');
+    $('pc-dashboard').classList.add('hidden');
+    $('trash-bar').classList.add('hidden');
+    $('explorer-view').classList.remove('hidden');
+
+    const res = await api('/api/smart-view', {
+      method: 'POST',
+      body: JSON.stringify({ criteria: sv.criteria || {} }),
+    });
+    const bar = $('smart-view-bar');
+    if (bar) bar.classList.remove('hidden');
+    if ($('smart-view-title')) $('smart-view-title').textContent = `${sv.icon || '✨'} ${sv.name}`;
+    const idxNote = (res.totalIndexed || 0) === 0
+      ? ' • ⚠️ İndeks boş: üstteki ⚡ İndeksle butonuyla diski tarayın'
+      : ` • ${res.items.length} öğe (${res.durationMs} ms)`;
+    if ($('smart-view-summary')) $('smart-view-summary').textContent = `İndeksten Sanal Görünüm${idxNote}`;
+
+    state.rawItems = res.items || [];
+    renderSmartViewsSidebar();
+    applySortAndFilter();
+    updateStatusCounts();
+    updateToolbarButtons();
+    $('status-timing').textContent = `${res.durationMs} ms (sanal)`;
+    if (state.thumbMode === 'viewport' || state.thumbMode === 'all') scheduleThumbBatch();
+  } catch (err) {
+    toast(`Akıllı klasör açılamadı: ${err.message}`, 'error');
+  }
+}
+
+function closeSmartView() {
+  state.smartViewCtx = null;
+  $('smart-view-bar')?.classList.add('hidden');
+  renderSmartViewsSidebar();
+  const tab = getActiveTab();
+  navigateTo(tab && tab.path ? tab.path : 'PC', { pushHistory: false, forceRefresh: false });
+}
+
+function renderDragShelf() {
+  const shelf = $('drag-shelf');
+  const listEl = $('drag-shelf-list');
+  const cntEl = $('drag-shelf-count');
+  const handleEl = $('drag-shelf-drag-handle');
+  const btnMove = $('btn-shelf-move-here');
+  const btnCopy = $('btn-shelf-copy-here');
+  if (!shelf || !listEl) return;
+
+  const items = Array.from(state.shelfItems.values());
+  if (cntEl) cntEl.textContent = String(items.length);
+  if (handleEl) {
+    handleEl.classList.toggle('hidden', items.length === 0);
+    handleEl.textContent = `🧲 Tümünü Sürükle (${items.length})`;
+  }
+  const tab = getActiveTab();
+  const canDropToCur = Boolean(tab && tab.path && tab.path !== 'PC' && tab.path !== 'TRASH');
+  if (btnMove) btnMove.disabled = items.length === 0 || !canDropToCur;
+  if (btnCopy) btnCopy.disabled = items.length === 0 || !canDropToCur;
+
+  listEl.innerHTML = '';
+  if (items.length === 0) {
+    listEl.innerHTML = '<div class="drag-shelf-empty muted-text">Dosyaları buraya sürükleyip başka klasörde tek hamlede bırakabilirsiniz.</div>';
+    return;
+  }
+  for (const it of items) {
+    const row = document.createElement('div');
+    row.className = 'drag-shelf-row';
+    row.title = it.path;
+    row.innerHTML = `
+      <span>${ICONS[it.category] || ICONS.other}</span>
+      <span class="drag-shelf-row-name">${esc(it.name || getFolderTitle(it.path))}</span>
+      <button type="button" class="mini-pill-btn" title="Raftan Çıkar">✕</button>
+    `;
+    row.querySelector('button').onclick = () => {
+      state.shelfItems.delete(it.path);
+      renderDragShelf();
+    };
+    listEl.appendChild(row);
+  }
+}
+
+function addItemsToShelf(itemsOrPaths) {
+  let added = 0;
+  for (const entry of itemsOrPaths || []) {
+    const p = typeof entry === 'string' ? entry : entry?.path;
+    if (!p || state.shelfItems.has(p)) continue;
+    const itemObj = typeof entry === 'object' && entry
+      ? entry
+      : (state.viewItems.find((x) => x.path === p) || state.dualItems.find((x) => x.path === p) || { path: p, name: getFolderTitle(p), category: 'other' });
+    state.shelfItems.set(p, itemObj);
+    added++;
+  }
+  state.shelfPinned = true;
+  $('drag-shelf')?.classList.remove('hidden');
+  renderDragShelf();
+  if (added > 0) toast(`🧲 ${added} öğe Geçici Rafa park edildi`);
+}
+
+function clearDragShelf() {
+  state.shelfItems.clear();
+  renderDragShelf();
+}
+
+function setShelfAutoReveal(isDragging) {
+  const shelf = $('drag-shelf');
+  if (!shelf) return;
+  if (isDragging) {
+    shelf.classList.remove('hidden');
+  } else if (state.shelfItems.size === 0 && !state.shelfPinned) {
+    shelf.classList.add('hidden');
+  }
+}
+
 function renderSidebarAndDashboard() {
+  renderSmartViewsSidebar();
   // Hızlı Erişim
   const qaList = $('quick-access-list');
   const qaGrid = $('quick-cards-grid');
@@ -1767,26 +1974,30 @@ function updateItemThumbInPlace(item, thumbUrl) {
 }
 
 // ---------- Seçim & Etkileşim ----------
-function handleItemSelect(index, e) {
-  const item = state.viewItems[index];
-  if (!item) return;
-
-  if (e.shiftKey && state.lastClickedIndex >= 0) {
-    const start = Math.min(state.lastClickedIndex, index);
-    const end = Math.max(state.lastClickedIndex, index);
-    if (!e.ctrlKey) state.selectedPaths.clear();
+function applyListSelection(items, selectedSet, lastIdx, index, e) {
+  const item = items[index];
+  if (!item) return lastIdx;
+  if (e.shiftKey && lastIdx >= 0) {
+    const start = Math.min(lastIdx, index);
+    const end = Math.max(lastIdx, index);
+    if (!e.ctrlKey) selectedSet.clear();
     for (let i = start; i <= end; i++) {
-      state.selectedPaths.add(state.viewItems[i].path);
+      selectedSet.add(items[i].path);
     }
-  } else if (e.ctrlKey || e.target.type === 'checkbox') {
-    if (state.selectedPaths.has(item.path)) state.selectedPaths.delete(item.path);
-    else state.selectedPaths.add(item.path);
-    state.lastClickedIndex = index;
-  } else {
-    state.selectedPaths.clear();
-    state.selectedPaths.add(item.path);
-    state.lastClickedIndex = index;
+    return lastIdx;
   }
+  if (e.ctrlKey || (e.target && e.target.type === 'checkbox')) {
+    if (selectedSet.has(item.path)) selectedSet.delete(item.path);
+    else selectedSet.add(item.path);
+    return index;
+  }
+  selectedSet.clear();
+  selectedSet.add(item.path);
+  return index;
+}
+
+function handleItemSelect(index, e) {
+  state.lastClickedIndex = applyListSelection(state.viewItems, state.selectedPaths, state.lastClickedIndex, index, e);
 
   updateSelectionDomInPlace();
   updateStatusCounts();
@@ -1795,6 +2006,29 @@ function handleItemSelect(index, e) {
   if (state.thumbMode === 'selected') {
     scheduleThumbBatch();
   }
+}
+
+function updateDualSelectionDomInPlace() {
+  const listEl = $('dual-list');
+  if (!listEl) return;
+  const rows = listEl.querySelectorAll('.dual-row[data-index]');
+  for (const el of rows) {
+    const item = state.dualItems[Number(el.dataset.index)];
+    if (!item) continue;
+    const isSel = state.dualSelectedPaths.has(item.path);
+    const isCut = state.clipboard.op === 'cut' && state.clipboard.paths.includes(item.path);
+    el.classList.toggle('selected', isSel);
+    el.classList.toggle('cut-dim', isCut);
+  }
+}
+
+function handleDualItemSelect(index, e) {
+  state.dualLastClickedIdx = applyListSelection(state.dualItems, state.dualSelectedPaths, state.dualLastClickedIdx, index, e);
+  updateDualSelectionDomInPlace();
+}
+
+function getDualSelectedItems() {
+  return state.dualItems.filter((it) => state.dualSelectedPaths.has(it.path));
 }
 
 function getSelectedItems() {
@@ -2010,6 +2244,16 @@ function renderQuickLookStage(item) {
   if (stNext) stNext.disabled = atEnd;
   const stage = $('ql-stage');
   const url = `/api/media?path=${encodeURIComponent(item.path)}`;
+  const framePrevBtn = $('btn-ql-frame-prev');
+  const frameNextBtn = $('btn-ql-frame-next');
+  const capBtn = $('btn-ql-capture');
+  const trimToggleBtn = $('btn-ql-trim-toggle');
+  const trimBar = $('ql-trim-bar');
+  if (framePrevBtn) framePrevBtn.classList.toggle('hidden', item.category !== 'video');
+  if (frameNextBtn) frameNextBtn.classList.toggle('hidden', item.category !== 'video');
+  if (capBtn) capBtn.classList.toggle('hidden', item.category !== 'video');
+  if (trimToggleBtn) trimToggleBtn.classList.toggle('hidden', item.category !== 'video');
+  if (trimBar) trimBar.classList.add('hidden');
 
   if (item.category === 'image') {
     stage.innerHTML = `<img src="${url}" alt="${esc(item.name)}" draggable="false" />`;
@@ -2040,6 +2284,31 @@ function renderQuickLookStage(item) {
           }));
         } catch {}
       });
+      if (item.category === 'video') {
+        state.qlTrimPreviewLoop = false;
+        updateTrimPreviewBtnUi();
+        mediaEl.addEventListener('loadedmetadata', () => {
+          if (!$('ql-trim-bar')?.classList.contains('hidden')) updateTrimDurationUi();
+        });
+        mediaEl.addEventListener('timeupdate', () => {
+          if (state.qlTrimPreviewLoop) {
+            const endSec = Number($('ql-trim-end')?.value || 0);
+            if (endSec > 0 && mediaEl.currentTime >= endSec) {
+              mediaEl.pause();
+              mediaEl.currentTime = endSec;
+              state.qlTrimPreviewLoop = false;
+              updateTrimPreviewBtnUi();
+            }
+          }
+          if (!$('ql-trim-bar')?.classList.contains('hidden')) updateTrimPlayheadUi();
+        });
+        mediaEl.addEventListener('pause', () => {
+          if (state.qlTrimPreviewLoop) {
+            state.qlTrimPreviewLoop = false;
+            updateTrimPreviewBtnUi();
+          }
+        });
+      }
     }
   } else {
     stage.innerHTML = `<div class="empty-state">Bu dosya türü için hızlı önizleme yok.<br><br>Varsayılan uygulamada açmak için sağ üstteki butonu kullanabilirsiniz.</div>`;
@@ -2050,6 +2319,151 @@ function renderQuickLookStage(item) {
   if (revBtn) revBtn.onclick = () => revealInExplorer(item.path);
   const relQlBtn = $('btn-ql-related');
   if (relQlBtn) relQlBtn.onclick = () => openRelatedDialog(item);
+}
+
+function stepQuickLookVideoFrame(deltaFrames = 1) {
+  const item = state.qlMediaItems[state.qlIndex];
+  const vid = $('ql-stage')?.querySelector('video');
+  if (!item || item.category !== 'video' || !vid) return;
+  if (!vid.paused) vid.pause();
+  const dur = Number.isFinite(vid.duration) && vid.duration > 0 ? vid.duration : 1e9;
+  const frameSec = 1 / 30;
+  vid.currentTime = Math.max(0, Math.min(dur, (vid.currentTime || 0) + deltaFrames * frameSec));
+  if (!$('ql-trim-bar')?.classList.contains('hidden')) updateTrimPlayheadUi();
+}
+
+async function captureQuickLookFrame() {
+  const item = state.qlMediaItems[state.qlIndex];
+  const vid = $('ql-stage')?.querySelector('video');
+  if (!item || !vid || vid.videoWidth <= 0 || vid.videoHeight <= 0) {
+    return toast('Kare yakalamak için videonun yüklenmiş olması gerekir', 'error');
+  }
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = vid.videoWidth;
+    canvas.height = vid.videoHeight;
+    canvas.getContext('2d').drawImage(vid, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.94);
+    const saveDir = state.settings.frameSaveMode === 'custom' ? (state.settings.frameSaveDir || '').trim() : '';
+    const res = await api('/api/media/save-frame', {
+      method: 'POST',
+      body: JSON.stringify({ videoPath: item.path, dataUrl, saveDir, timeSec: vid.currentTime || 0 }),
+    });
+    toast(`📸 Kare kaydedildi: ${res.savedPath}`, 'success');
+    const tab = getActiveTab();
+    const savedParent = String(res.savedPath || '').replace(/\\[^\\]+$/, '').toLowerCase();
+    if (tab && tab.path && tab.path.toLowerCase() === savedParent) {
+      navigateTo(tab.path, { pushHistory: false, forceRefresh: true, preserveScroll: true });
+    }
+  } catch (err) {
+    toast(`Kare kaydedilemedi: ${err.message}`, 'error');
+  }
+}
+
+function formatTrimTime(sec) {
+  const clean = Math.max(0, Number(sec) || 0);
+  const mins = Math.floor(clean / 60);
+  const rem = clean - mins * 60;
+  const whole = Math.floor(rem);
+  const tenths = Math.floor((rem - whole) * 10);
+  return `${String(mins).padStart(2, '0')}:${String(whole).padStart(2, '0')}.${tenths}`;
+}
+
+function getTrimVideoDuration(vid) {
+  if (vid && Number.isFinite(vid.duration) && vid.duration > 0) return vid.duration;
+  return Math.max(10, Number($('ql-trim-end')?.value || 10));
+}
+
+function updateTrimPreviewBtnUi() {
+  const btn = $('btn-ql-trim-preview');
+  if (btn) btn.textContent = state.qlTrimPreviewLoop ? '⏸ Önizlemeyi Durdur' : '▶ Seçimi Oynat';
+}
+
+function updateTrimPlayheadUi() {
+  const vid = $('ql-stage')?.querySelector('video');
+  const head = $('ql-trim-playhead');
+  if (!vid || !head) return;
+  const dur = getTrimVideoDuration(vid);
+  const pct = Math.max(0, Math.min(100, ((vid.currentTime || 0) / dur) * 100));
+  head.style.left = `${pct}%`;
+}
+
+function updateTrimDurationUi() {
+  const vid = $('ql-stage')?.querySelector('video');
+  const dur = getTrimVideoDuration(vid);
+  const s = Math.max(0, Math.min(dur, Number($('ql-trim-start')?.value || 0)));
+  const e = Math.max(0, Math.min(dur, Number($('ql-trim-end')?.value || 0)));
+  if ($('ql-trim-start-fmt')) $('ql-trim-start-fmt').textContent = formatTrimTime(s);
+  if ($('ql-trim-end-fmt')) $('ql-trim-end-fmt').textContent = formatTrimTime(e);
+  if ($('ql-trim-time-max')) $('ql-trim-time-max').textContent = formatTrimTime(dur);
+
+  const pctA = Math.max(0, Math.min(100, (s / dur) * 100));
+  const pctB = Math.max(0, Math.min(100, (e / dur) * 100));
+  if ($('ql-trim-handle-a')) $('ql-trim-handle-a').style.left = `${pctA}%`;
+  if ($('ql-trim-handle-b')) $('ql-trim-handle-b').style.left = `${pctB}%`;
+  if ($('ql-trim-selection')) {
+    $('ql-trim-selection').style.left = `${Math.min(pctA, pctB)}%`;
+    $('ql-trim-selection').style.width = `${Math.max(0, pctB - pctA)}%`;
+  }
+  updateTrimPlayheadUi();
+
+  const lbl = $('ql-trim-duration');
+  if (!lbl) return;
+  const diff = e - s;
+  if (diff > 0.05) {
+    lbl.classList.remove('invalid');
+    lbl.textContent = `Seçili: ${formatTrimTime(diff)} (${diff.toFixed(1)} sn)`;
+  } else {
+    lbl.classList.add('invalid');
+    lbl.textContent = 'Geçersiz aralık (B > A olmalı)';
+  }
+}
+
+function toggleQuickLookTrimBar() {
+  const bar = $('ql-trim-bar');
+  const vid = $('ql-stage')?.querySelector('video');
+  if (!bar || !vid) return;
+  state.qlTrimPreviewLoop = false;
+  updateTrimPreviewBtnUi();
+  const willShow = bar.classList.contains('hidden');
+  bar.classList.toggle('hidden', !willShow);
+  if (willShow) {
+    const dur = Number.isFinite(vid.duration) && vid.duration > 0 ? vid.duration : 10;
+    const cur = Number.isFinite(vid.currentTime) ? vid.currentTime : 0;
+    const startVal = cur >= dur - 0.5 ? 0 : cur;
+    $('ql-trim-start').value = startVal.toFixed(1);
+    $('ql-trim-end').value = dur.toFixed(1);
+    updateTrimDurationUi();
+  }
+}
+
+async function runQuickLookTrim() {
+  const item = state.qlMediaItems[state.qlIndex];
+  const btn = $('btn-ql-trim-run');
+  if (!item) return;
+  const startSec = Number($('ql-trim-start')?.value || 0);
+  const endSec = Number($('ql-trim-end')?.value || 0);
+  if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec + 0.1) {
+    return toast('Geçerli bir kırpma aralığı seçin (Bitiş > Başlangıç)', 'error');
+  }
+  if (btn) btn.disabled = true;
+  try {
+    const saveDir = state.settings.trimSaveMode === 'custom' ? (state.settings.trimSaveDir || '').trim() : '';
+    const res = await api('/api/media/trim-video', {
+      method: 'POST',
+      body: JSON.stringify({ path: item.path, startSec, endSec, saveDir }),
+    });
+    toast(`✂️ Kayıpsız kırpıldı: ${res.savedPath}`, 'success');
+    const tab = getActiveTab();
+    const outParent = String(res.savedPath || '').replace(/\\[^\\]+$/, '').toLowerCase();
+    if (tab && tab.path && tab.path.toLowerCase() === outParent) {
+      navigateTo(tab.path, { pushHistory: false, forceRefresh: true, preserveScroll: true });
+    }
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 const MONTH_NAMES_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
@@ -2382,8 +2796,8 @@ async function createNewFolder() {
   }
 }
 
-async function renameSelected() {
-  const sel = getSelectedItems();
+async function renameSelected(overrideItems = null) {
+  const sel = overrideItems || getSelectedItems();
   if (sel.length === 0) return;
   if (sel.length > 1) return batchRenameSelected(sel);
 
@@ -2398,6 +2812,7 @@ async function renameSelected() {
     const actRes = await api('/api/fs/action', { method: 'POST', body: JSON.stringify({ action: 'rename', path: item.path, newName: res.newName.trim() }) });
     if (actRes.undoSummary) updateUndoButton(actRes.undoSummary);
     navigateTo(getActiveTab().path, { pushHistory: false, forceRefresh: true, preserveScroll: true });
+    if (state.dualOpen && state.dualPath) navigateDual(state.dualPath, false);
   } catch (err) {
     toast(err.message, 'error');
   }
@@ -2751,6 +3166,7 @@ function setClipboard(op, overridePaths = null) {
   state.clipboard = { op, paths };
   updateToolbarButtons();
   renderVirtualList();
+  updateDualSelectionDomInPlace();
   api('/api/clipboard/os', {
     method: 'POST',
     body: JSON.stringify({ op, paths }),
@@ -2759,21 +3175,22 @@ function setClipboard(op, overridePaths = null) {
   toast(`${paths.length} öğe ${op === 'cut' ? 'kesildi' : 'kopyalandı'}`);
 }
 
-async function pasteToCurrentFolder() {
-  const tab = getActiveTab();
-  if (!tab || tab.path === 'PC' || tab.path === 'TRASH') return;
+async function pasteToCurrentFolder(overrideDestDir = null) {
+  const targetDir = overrideDestDir || getActiveTab()?.path;
+  if (!targetDir || targetDir === 'PC' || targetDir === 'TRASH') return;
   if (state.clipboard.paths.length > 0) {
-    await enqueueTransfer(state.clipboard.op, state.clipboard.paths, tab.path);
+    await enqueueTransfer(state.clipboard.op, state.clipboard.paths, targetDir);
     if (state.clipboard.op === 'cut') {
       state.clipboard = { op: null, paths: [] };
       updateToolbarButtons();
+      updateDualSelectionDomInPlace();
     }
     return;
   }
   try {
     const osClip = await api('/api/clipboard/os', { silentErrors: true });
     if (osClip && Array.isArray(osClip.paths) && osClip.paths.length > 0) {
-      await enqueueTransfer(osClip.op || 'copy', osClip.paths, tab.path);
+      await enqueueTransfer(osClip.op || 'copy', osClip.paths, targetDir);
       return;
     }
   } catch {}
@@ -3545,8 +3962,8 @@ function addItemsToBasket(items) {
   toast(`${added} öğe sepete eklendi (Toplam: ${state.basket.size})`);
 }
 
-function toggleSelectedInBasket() {
-  const sel = getSelectedItems();
+function toggleSelectedInBasket(overrideItems = null) {
+  const sel = overrideItems || getSelectedItems();
   if (sel.length === 0) return;
   let added = 0;
   let removed = 0;
@@ -3650,6 +4067,32 @@ function renderBasket() {
   }
 }
 
+function formatCacheAge(ts) {
+  if (!ts) return '';
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diffSec < 60) return 'az önce';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} dk önce`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} sa önce`;
+  return `${Math.floor(diffHr / 24)} gün önce`;
+}
+
+function buildCacheBannerHtml(data, btnId, freshLabel = '🔄 Canlı Yenile') {
+  if (!data || !data.fromCache) return '';
+  const age = formatCacheAge(data.cachedAt);
+  if (data.stale) {
+    return `
+      <span>💡 <strong>${esc(data.staleReason || 'Değişiklik algılandı')}</strong> — önbellekten (${esc(age)}) gösteriliyor; tekrar taramanız önerilir.</span>
+      <button type="button" id="${btnId}" class="cmd-btn small primary">🔄 Şimdi Yeniden Tara</button>
+    `;
+  }
+  return `
+    <span>⚡ <strong>Önbellekten anında yüklendi</strong> (${esc(age)})</span>
+    <button type="button" id="${btnId}" class="cmd-btn small">${esc(freshLabel)}</button>
+  `;
+}
+
 // ---------- Disk & Klasör Analizörü ----------
 function restoreTabAnalyzerView(tab) {
   if (!tab) return;
@@ -3666,7 +4109,9 @@ function restoreTabAnalyzerView(tab) {
   $('btn-analyzer-live').dataset.path = targetPath;
   $('btn-analyzer-dupes').dataset.path = targetPath;
 
+  const cacheBanner = $('analyzer-cache-banner');
   if (tab.analyzerLoading) {
+    if (cacheBanner) cacheBanner.classList.add('hidden');
     $('analyzer-loading').classList.remove('hidden');
     $('analyzer-subtitle').textContent = 'Tarama / analiz devam ediyor...';
     $('stacked-bar').innerHTML = '';
@@ -3677,8 +4122,18 @@ function restoreTabAnalyzerView(tab) {
     $('analyzer-loading').classList.add('hidden');
     if (tab.analyzerData) {
       const d = tab.analyzerData;
-      $('analyzer-subtitle').textContent = `${d.totalFiles.toLocaleString('tr-TR')} dosya • ${formatBytes(d.totalBytes)} (${d.source === 'sqlite-cache' ? 'SSD İndeksinden Anında' : 'Canlı Tarama'}${d.cancelled ? ' • Kısmi' : ''})`;
+      $('analyzer-subtitle').textContent = `${d.totalFiles.toLocaleString('tr-TR')} dosya • ${formatBytes(d.totalBytes)} (${d.fromCache ? 'Önbellekten' : (d.source === 'sqlite-cache' ? 'SSD İndeksinden Anında' : 'Canlı Tarama')}${d.cancelled ? ' • Kısmi' : ''})`;
+      if (cacheBanner) {
+        const html = buildCacheBannerHtml(d, 'btn-cache-rescan-analyzer');
+        cacheBanner.classList.toggle('hidden', !html);
+        cacheBanner.classList.toggle('stale', Boolean(d.stale));
+        cacheBanner.innerHTML = html;
+        const rBtn = $('btn-cache-rescan-analyzer');
+        if (rBtn) rBtn.onclick = () => openAnalyzer(targetPath, 'live');
+      }
       renderAnalyzerResult(d);
+    } else if (cacheBanner) {
+      cacheBanner.classList.add('hidden');
     }
   }
 
@@ -3820,7 +4275,7 @@ async function cancelPendingFolderSizes(showToast = false) {
   pollTransferStatus();
 }
 
-async function calculateCurrentFolderSizes() {
+async function calculateCurrentFolderSizes(force = false) {
   if (state.folderSizeRunning) {
     await cancelPendingFolderSizes(true);
     return;
@@ -3841,7 +4296,7 @@ async function calculateCurrentFolderSizes() {
   try {
     const res = await api('/api/folder-sizes', {
       method: 'POST',
-      body: JSON.stringify({ parentDir: startPath, paths: dirs.map((d) => d.path) }),
+      body: JSON.stringify({ parentDir: startPath, paths: dirs.map((d) => d.path), force: Boolean(force) }),
     });
     if (res.sizes) {
       for (const [fp, bytes] of Object.entries(res.sizes)) {
@@ -3867,7 +4322,16 @@ async function calculateCurrentFolderSizes() {
       $('btn-sort-dir').textContent = '▼';
       applySortAndFilter();
     }
-    toast(`${dirs.length} klasör boyutu hesaplandı (${startPath} • Toplam: ${formatBytes(totalFolderBytes)})`, 'success');
+    if (res.fromCache) {
+      toast(
+        res.stale
+          ? `💡 Boyutlar önbellekten yüklendi (${formatCacheAge(res.cachedAt)}) — değişiklik algılandı! Yenilemek için Shift + 📏 Boyutlar tıklayın`
+          : `⚡ ${dirs.length} klasör boyutu önbellekten yüklendi (Canlı tarama için Shift+Tık)`,
+        res.stale ? 'info' : 'success'
+      );
+    } else {
+      toast(`${dirs.length} klasör boyutu hesaplandı (${startPath} • Toplam: ${formatBytes(totalFolderBytes)})`, 'success');
+    }
   } catch (err) {
     if (err.name === 'AbortError') return;
     toast(err.message, 'error');
@@ -3882,9 +4346,107 @@ async function calculateCurrentFolderSizes() {
   }
 }
 
+function showOrganizeDateModal(currentDir, prev) {
+  return new Promise((resolve) => {
+    const dlg = $('organize-date-dialog');
+    const form = $('org-date-form');
+    const customRow = $('org-custom-dest-row');
+    const customInp = $('org-custom-dest-input');
+    const btnBrowse = $('btn-org-browse');
+    const btnUseDual = $('btn-org-use-dual');
+    const previewBox = $('org-output-preview');
+
+    const topLines = prev.preview.slice(0, 6).map((p) => `${p.folder} (${p.count})`).join(', ');
+    const more = prev.preview.length > 6 ? ` +${prev.preview.length - 6} klasör daha` : '';
+    const sizeInfo = prev.totalBytes ? ` (${formatBytes(prev.totalBytes)})` : '';
+    $('org-date-summary').textContent = `${prev.totalFiles} dosya${sizeInfo}, değiştirme tarihine göre ${prev.folderCount} alt klasöre ayrılacak.`;
+    $('org-current-path-label').textContent = currentDir;
+
+    const rCopy = form.querySelector('input[name="org-mode"][value="copy"]');
+    const rCur = form.querySelector('input[name="org-dest-mode"][value="current"]');
+    if (rCopy) rCopy.checked = true;
+    if (rCur) rCur.checked = true;
+    customInp.value = '';
+    customRow.classList.add('hidden');
+    btnUseDual.classList.toggle('hidden', !(state.dualOpen && state.dualPath));
+
+    const getMode = () => form.querySelector('input[name="org-mode"]:checked')?.value || 'copy';
+    const getDestMode = () => form.querySelector('input[name="org-dest-mode"]:checked')?.value || 'current';
+    const updatePreview = () => {
+      const destMode = getDestMode();
+      customRow.classList.toggle('hidden', destMode !== 'custom');
+      const rawBase = destMode === 'custom' ? (customInp.value.trim() || '<Seçilen Konum>') : currentDir;
+      const baseClean = rawBase.replace(/[\\/]+$/, '');
+      const fullOut = `${baseClean}\\${prev.outputFolderName}`;
+      const modeLabel = getMode() === 'copy' ? 'Kopyalayarak (orijinaller kalır)' : 'Taşıyarak (orijinaller taşınır)';
+      previewBox.innerHTML = `
+        <div><strong>İşlem:</strong> ${esc(modeLabel)}</div>
+        <div><strong>Oluşacak Ana Klasör:</strong><code>${esc(fullOut)}</code></div>
+        <div class="muted-text" style="margin-top:4px;">Alt klasörler: ${esc(topLines + more)}</div>
+      `;
+    };
+
+    form.querySelectorAll('input[name="org-mode"], input[name="org-dest-mode"]').forEach((r) => {
+      r.onchange = updatePreview;
+    });
+    customInp.oninput = updatePreview;
+
+    btnUseDual.onclick = () => {
+      if (state.dualPath) {
+        customInp.value = state.dualPath;
+        updatePreview();
+      }
+    };
+
+    btnBrowse.onclick = async () => {
+      btnBrowse.disabled = true;
+      try {
+        const res = await api('/api/fs/action', {
+          method: 'POST',
+          body: JSON.stringify({ action: 'pickFolder', initialDir: customInp.value.trim() || currentDir }),
+        });
+        if (res && res.path) {
+          customInp.value = res.path;
+          updatePreview();
+        }
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        btnBrowse.disabled = false;
+      }
+    };
+
+    let settled = false;
+    const cleanup = (val) => {
+      if (settled) return;
+      settled = true;
+      if (dlg.open) dlg.close();
+      resolve(val);
+    };
+
+    $('btn-org-cancel').onclick = () => cleanup(null);
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const mode = getMode();
+      const destMode = getDestMode();
+      const destDir = destMode === 'custom' ? customInp.value.trim() : currentDir;
+      if (destMode === 'custom' && !destDir) {
+        toast('Lütfen hedef klasör seçin veya yolunu yazın', 'error');
+        customInp.focus();
+        return;
+      }
+      cleanup({ mode, destDir });
+    };
+    dlg.oncancel = () => cleanup(null);
+    dlg.onclose = () => cleanup(null);
+    updatePreview();
+    dlg.showModal();
+  });
+}
+
 async function organizeCurrentFolderByDate() {
   const tab = getActiveTab();
-  if (!tab || tab.path === 'PC') return toast('Önce bir klasör açın', 'error');
+  if (!tab || tab.path === 'PC' || tab.path === 'TRASH') return toast('Önce bir klasör açın', 'error');
   try {
     const prev = await api('/api/fs/action', {
       method: 'POST',
@@ -3892,18 +4454,18 @@ async function organizeCurrentFolderByDate() {
     });
     if (!prev.totalFiles) return toast('Bu klasörde düzenlenecek dosya yok');
 
-    const topLines = prev.preview.slice(0, 6).map((p) => `${p.folder} (${p.count})`).join(', ');
-    const more = prev.preview.length > 6 ? ` +${prev.preview.length - 6} klasör daha` : '';
-    const confirmRes = await showPromptModal({
-      title: 'Tarihe Göre Otomatik Klasörle',
-      desc: `${prev.totalFiles} dosya değiştirme tarihine göre ${prev.folderCount} adet Yıl/Ay klasörüne (0 bayt kopyalama / anında taşıma) dağıtılacak:\n${topLines}${more}`,
-      okText: 'Klasörlere Ayır',
-    });
-    if (!confirmRes) return;
+    const opts = await showOrganizeDateModal(tab.path, prev);
+    if (!opts) return;
 
     const done = await api('/api/fs/action', {
       method: 'POST',
-      body: JSON.stringify({ action: 'organizeByDate', parentDir: tab.path, dryRun: false }),
+      body: JSON.stringify({
+        action: 'organizeByDate',
+        parentDir: tab.path,
+        destDir: opts.destDir,
+        mode: opts.mode,
+        dryRun: false,
+      }),
     });
     openProcessModal(done.jobId);
   } catch (err) {
@@ -3917,8 +4479,15 @@ function renderDuplicatesResult(data) {
   const protectedNote = data.skippedProtectedCount > 0
     ? `<div class="muted-text" style="font-size:11.5px;margin-bottom:8px;">🛡️ Güvenlik koruması: Sistem, program ve uygulama klasörlerinden (Windows, Program Files, AppData, ProgramData, .dll/.exe/.dat) ${data.skippedProtectedCount.toLocaleString('tr-TR')} dosya hariç tutuldu.</div>`
     : '';
+  const dupesBannerHtml = buildCacheBannerHtml(data, 'btn-cache-rescan-dupes', '🔄 Kopyaları Yeniden Tara');
+  const dupesBannerWrap = dupesBannerHtml
+    ? `<div class="cache-status-banner${data.stale ? ' stale' : ''}">${dupesBannerHtml}</div>`
+    : '';
+
   if (!data.groups || data.groups.length === 0) {
-    panel.innerHTML = `<h3>🧬 Kopya Dosya Bulucu</h3>${protectedNote}<div class="muted-text">Bu konumda birebir kopya dosya bulunamadı.</div>`;
+    panel.innerHTML = `${dupesBannerWrap}<h3>🧬 Kopya Dosya Bulucu</h3>${protectedNote}<div class="muted-text">Bu konumda birebir kopya dosya bulunamadı.</div>`;
+    const rBtn = $('btn-cache-rescan-dupes');
+    if (rBtn) rBtn.onclick = () => findAndRenderDuplicates(true);
     return;
   }
 
@@ -3928,6 +4497,7 @@ function renderDuplicatesResult(data) {
   }
 
   panel.innerHTML = `
+    ${dupesBannerWrap}
     ${protectedNote}
     <div class="dupes-summary">
       <div>
@@ -3939,6 +4509,9 @@ function renderDuplicatesResult(data) {
     </div>
     <div id="dupe-groups-list" class="dupe-groups-list"></div>
   `;
+
+  const rBtn = $('btn-cache-rescan-dupes');
+  if (rBtn) rBtn.onclick = () => findAndRenderDuplicates(true);
 
   const listEl = $('dupe-groups-list');
   for (const g of data.groups) {
@@ -3970,7 +4543,7 @@ function renderDuplicatesResult(data) {
   };
 }
 
-async function findAndRenderDuplicates() {
+async function findAndRenderDuplicates(force = false) {
   const originTab = getActiveTab();
   const targetPath = (originTab && originTab.analyzerPath) || $('btn-analyzer-dupes').dataset.path || state.drives[0]?.path || 'C:\\';
   if (originTab) {
@@ -3985,7 +4558,7 @@ async function findAndRenderDuplicates() {
 
   setTimeout(pollTransferStatus, 80);
   try {
-    const data = await api(`/api/duplicates?path=${encodeURIComponent(targetPath)}`);
+    const data = await api(`/api/duplicates?path=${encodeURIComponent(targetPath)}&force=${force === true ? '1' : '0'}`);
     if (originTab) {
       originTab.dupesLoading = false;
       if (data.cancelled) {
@@ -4047,8 +4620,18 @@ async function navigateDual(targetPath, pushHistory = true) {
       state.dualHistory.push(data.path);
       state.dualHistoryIdx = state.dualHistory.length - 1;
     }
+    const changedDir = !state.dualPath || state.dualPath.toLowerCase() !== String(data.path).toLowerCase();
     state.dualPath = data.path;
     state.dualItems = sortItemsArray(data.items);
+    if (changedDir) {
+      state.dualSelectedPaths.clear();
+      state.dualLastClickedIdx = -1;
+    } else {
+      const validPaths = new Set(state.dualItems.map((it) => it.path));
+      for (const p of Array.from(state.dualSelectedPaths)) {
+        if (!validPaths.has(p)) state.dualSelectedPaths.delete(p);
+      }
+    }
     $('dual-path-input').value = data.path;
     $('dual-btn-back').disabled = state.dualHistoryIdx <= 0;
     renderDualList();
@@ -4065,24 +4648,27 @@ async function navigateDual(targetPath, pushHistory = true) {
 function renderDualList() {
   const listEl = $('dual-list');
   listEl.innerHTML = '';
-  for (const item of state.dualItems) {
+  const frag = document.createDocumentFragment();
+  for (let idx = 0; idx < state.dualItems.length; idx++) {
+    const item = state.dualItems[idx];
+    const isSel = state.dualSelectedPaths.has(item.path);
+    const isCut = state.clipboard.op === 'cut' && state.clipboard.paths.includes(item.path);
     const row = document.createElement('div');
-    row.className = 'dual-row';
+    row.className = `dual-row${isSel ? ' selected' : ''}${isCut ? ' cut-dim' : ''}`;
+    row.dataset.index = idx;
     row.dataset.path = item.path;
     row.dataset.isdir = item.isDir ? '1' : '0';
     row.draggable = true;
     row.title = item.path;
     row.innerHTML = `
-      <span>${ICONS[item.category] || ICONS.other}</span>
+      <span class="dual-row-icon">${ICONS[item.category] || ICONS.other}</span>
       <span class="dual-row-name">${esc(item.name)}</span>
+      <span class="dual-row-spacer"></span>
       <span class="dual-row-size">${item.isDir ? '' : formatBytes(item.size)}</span>
     `;
-    row.ondblclick = () => {
-      if (item.isDir) navigateDual(item.path);
-      else openExternally(item.path);
-    };
-    listEl.appendChild(row);
+    frag.appendChild(row);
   }
+  listEl.appendChild(frag);
 }
 
 // ---------- Arka Plan İndeksleyici & Arama ----------
@@ -4500,15 +5086,64 @@ function bindEvents() {
   };
 
   // Analizör, Kopya Bulucu, Klasör Boyutları, Tarih Düzenleyici, Çift Panel & Sepet
+  const btnSaveSmart = $('btn-studio-save-smart');
+  if (btnSaveSmart) {
+    btnSaveSmart.onclick = async () => {
+      const criteria = {};
+      const pat = $('flt-pattern')?.value.trim();
+      if (pat) criteria.nameContains = pat.replace(/\*/g, '').replace(/\.\*/g, '').trim();
+      const cat = $('flt-category')?.value;
+      if (cat && cat !== 'all') criteria.category = cat;
+      const extVal = $('flt-ext')?.value.trim();
+      if (extVal) criteria.extList = extVal.split(',').map((s) => s.trim()).filter(Boolean);
+      const minSz = Number($('flt-size-min')?.value || 0);
+      if (minSz > 0) criteria.minSize = minSz * Number($('flt-size-min-unit')?.value || 1048576);
+      const maxSz = Number($('flt-size-max')?.value || 0);
+      if (maxSz > 0) criteria.maxSize = maxSz * Number($('flt-size-max-unit')?.value || 1048576);
+      const tab = getActiveTab();
+      if (tab && tab.path && /^[a-zA-Z]:/.test(tab.path)) {
+        criteria.driveRoot = tab.path.slice(0, 3);
+      }
+      const res = await showPromptModal({
+        title: '✨ Akıllı Klasör Olarak Kaydet',
+        desc: 'Geçerli filtre kriterleri sol menüdeki Akıllı Klasörler altına sanal klasör olarak eklenecek:',
+        fields: [{ name: 'name', label: 'Klasör Adı', value: pat || (cat && cat !== 'all' ? `${cat} Görünümü` : 'Özel Akıllı Görünüm') }],
+        okText: 'Kaydet',
+      });
+      if (!res || !res.name.trim()) return;
+      state.smartViews.push({
+        id: 'sv_' + Date.now().toString(36),
+        icon: '✨',
+        name: res.name.trim(),
+        builtin: false,
+        criteria,
+      });
+      state.smartViewsOpen = true;
+      saveSmartViews();
+      renderSmartViewsSidebar();
+      toast(`✨ "${res.name.trim()}" Akıllı Klasörlere eklendi`, 'success');
+    };
+  }
+  const btnToggleSmart = $('btn-toggle-smart-views');
+  if (btnToggleSmart) {
+    btnToggleSmart.onclick = () => {
+      state.smartViewsOpen = !state.smartViewsOpen;
+      try { localStorage.setItem('ld_smart_views_open', state.smartViewsOpen ? '1' : '0'); } catch {}
+      renderSmartViewsSidebar();
+    };
+  }
+  if ($('btn-smart-view-refresh')) $('btn-smart-view-refresh').onclick = () => { if (state.smartViewCtx) openSmartView(state.smartViewCtx); };
+  if ($('btn-smart-view-close')) $('btn-smart-view-close').onclick = closeSmartView;
+
   $('btn-analyze').onclick = () => openAnalyzer();
   $('btn-analyzer-live').onclick = () => openAnalyzer($('btn-analyzer-live').dataset.path, 'live');
-  $('btn-analyzer-dupes').onclick = findAndRenderDuplicates;
+  $('btn-analyzer-dupes').onclick = () => findAndRenderDuplicates(false);
   $('btn-analyzer-close').onclick = () => {
     const tab = getActiveTab();
     navigateTo(tab ? tab.path : 'PC', { pushHistory: false });
   };
 
-  $('btn-folder-sizes').onclick = calculateCurrentFolderSizes;
+  $('btn-folder-sizes').onclick = (e) => calculateCurrentFolderSizes(Boolean(e?.shiftKey));
   $('btn-organize-date').onclick = organizeCurrentFolderByDate;
   $('btn-install-shortcut').onclick = async () => {
     try {
@@ -4565,17 +5200,41 @@ function bindEvents() {
   setBind('set-folders-first', 'foldersFirst', true, () => applySortAndFilter());
   setBind('set-show-ext', 'showExtensions', true, () => renderVirtualList());
   setBind('set-compact-sidebar', 'compactSidebar', true);
-  setBind('set-startup-mode', 'startupMode', false, () => {
-    const row = $('set-startup-custom-row');
-    if (row) row.classList.toggle('hidden', state.settings.startupMode !== 'custom');
-  });
-  const setStartPath = $('set-startup-path');
-  if (setStartPath) {
-    setStartPath.onchange = () => {
-      state.settings.startupPath = setStartPath.value.trim();
-      saveAppSettings();
-    };
-  }
+  const bindCustomPathSetting = (modeSelectId, customRowId, inputId, browseBtnId, modeProp, dirProp) => {
+    setBind(modeSelectId, modeProp, false, () => {
+      const row = $(customRowId);
+      if (row) row.classList.toggle('hidden', state.settings[modeProp] !== 'custom');
+    });
+    const inputEl = $(inputId);
+    if (inputEl) {
+      inputEl.onchange = () => {
+        state.settings[dirProp] = inputEl.value.trim();
+        saveAppSettings();
+      };
+    }
+    const browseBtn = $(browseBtnId);
+    if (browseBtn) {
+      browseBtn.onclick = async () => {
+        browseBtn.disabled = true;
+        try {
+          const res = await api('/api/fs/action', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'pickFolder', initialDir: state.settings[dirProp] || '' }),
+          });
+          if (res && res.path) {
+            state.settings[dirProp] = res.path;
+            if ($(inputId)) $(inputId).value = res.path;
+            saveAppSettings();
+          }
+        } catch (err) {
+          toast(err.message, 'error');
+        } finally {
+          browseBtn.disabled = false;
+        }
+      };
+    }
+  };
+  bindCustomPathSetting('set-startup-mode', 'set-startup-custom-row', 'set-startup-path', 'btn-set-startup-browse', 'startupMode', 'startupPath');
   setBind('set-click-mode', 'clickMode');
   setBind('set-trash-confirm', 'trashConfirmMode');
   setBind('set-auto-close-proc', 'autoCloseProcessModal', true);
@@ -4585,6 +5244,9 @@ function bindEvents() {
     cancelPendingThumbs();
     if (state.thumbMode !== 'off') scheduleThumbBatch();
   });
+  setBind('set-dblclick-quicklook', 'dblClickQuickLook', true);
+  bindCustomPathSetting('set-frame-save-mode', 'set-frame-save-custom-row', 'set-frame-save-dir', 'btn-set-frame-save-browse', 'frameSaveMode', 'frameSaveDir');
+  bindCustomPathSetting('set-trim-save-mode', 'set-trim-save-custom-row', 'set-trim-save-dir', 'btn-set-trim-save-browse', 'trimSaveMode', 'trimSaveDir');
   setBind('set-video-autoplay', 'videoAutoplay', true);
   setBind('set-video-loop', 'videoLoop', true);
 
@@ -4804,6 +5466,7 @@ function bindEvents() {
   };
 
   vp.onclick = (e) => {
+    state.activePane = 'left';
     if (state.suppressNextClick) {
       state.suppressNextClick = false;
       return;
@@ -4868,6 +5531,52 @@ function bindEvents() {
       if (item && item.isDir) createTab(item.path, true);
     }
   };
+
+  const dualListEl = $('dual-list');
+  if (dualListEl) {
+    dualListEl.onclick = (e) => {
+      state.activePane = 'dual';
+      if (state.suppressNextClick) {
+        state.suppressNextClick = false;
+        return;
+      }
+      const rowEl = e.target.closest('.dual-row[data-index]');
+      if (!rowEl) {
+        if (!e.ctrlKey && !e.shiftKey) {
+          state.dualSelectedPaths.clear();
+          updateDualSelectionDomInPlace();
+        }
+        return;
+      }
+      const idx = Number(rowEl.dataset.index);
+      const item = state.dualItems[idx];
+      if (!item) return;
+      handleDualItemSelect(idx, e);
+      if (!e.ctrlKey && !e.shiftKey && state.settings.clickMode === 'single') {
+        if (item.isDir) navigateDual(item.path);
+        else openExternally(item.path);
+      }
+    };
+
+    dualListEl.ondblclick = (e) => {
+      const rowEl = e.target.closest('.dual-row[data-index]');
+      if (!rowEl) return;
+      const item = state.dualItems[Number(rowEl.dataset.index)];
+      if (!item) return;
+      if (item.isDir) navigateDual(item.path);
+      else if (shouldOpenInQuickLook(item)) openQuickLook(item, state.dualItems);
+      else openExternally(item.path);
+    };
+
+    dualListEl.onauxclick = (e) => {
+      if (e.button === 1) {
+        const rowEl = e.target.closest('.dual-row[data-index]');
+        if (!rowEl) return;
+        const item = state.dualItems[Number(rowEl.dataset.index)];
+        if (item && item.isDir) createTab(item.path, true);
+      }
+    };
+  }
 
   $('chk-select-all').onchange = (e) => {
     state.selectedPaths.clear();
@@ -5103,38 +5812,54 @@ function bindEvents() {
     // 3) Sağ Çift Panel (#dual-list)
     const dualListEl = $('dual-list');
     if (dualListEl && dualListEl.contains(e.target)) {
+      state.activePane = 'dual';
       const row = e.target.closest('.dual-row');
       const tab = getActiveTab();
       const leftCanReceive = tab && tab.path !== 'PC' && tab.path !== 'TRASH';
       if (row) {
         const p = row.dataset.path;
+        const idx = Number(row.dataset.index);
+        if (!state.dualSelectedPaths.has(p)) {
+          state.dualSelectedPaths.clear();
+          state.dualSelectedPaths.add(p);
+          if (!Number.isNaN(idx)) state.dualLastClickedIdx = idx;
+          updateDualSelectionDomInPlace();
+        }
+        const dualSelPaths = state.dualSelectedPaths.size > 0 ? Array.from(state.dualSelectedPaths) : [p];
+        const dualSelItems = getDualSelectedItems();
         const isDir = row.dataset.isdir === '1';
+        const multiCount = dualSelPaths.length;
+        const countTag = multiCount > 1 ? ` (${multiCount})` : '';
         const dualItem = state.dualItems.find((x) => x.path === p) || { path: p, isDir, name: getFolderTitle(p), size: 0, mtime: Date.now(), category: 'other' };
         showCustomContextMenu(e, [
-          { label: isDir ? '📂 Sağ Panelde Aç' : '🚀 Varsayılan Uygulamada Aç', bold: true, onClick: () => (isDir ? navigateDual(p) : openExternally(p)) },
-          isDir ? { label: '📑 Sol Sekmede Aç', onClick: () => navigateTo(p) } : { label: '👁️ Hızlı Önizle', onClick: () => openQuickLook(dualItem, state.dualItems) },
+          multiCount === 1 ? { label: isDir ? '📂 Sağ Panelde Aç' : '🚀 Varsayılan Uygulamada Aç', bold: true, onClick: () => (isDir ? navigateDual(p) : openExternally(p)) } : null,
+          multiCount === 1 && isDir ? { label: '📑 Sol Sekmede Aç', onClick: () => navigateTo(p) } : null,
+          multiCount === 1 && !isDir ? { label: '👁️ Hızlı Önizle', onClick: () => openQuickLook(dualItem, state.dualItems) } : null,
+          multiCount === 1 ? { sep: true } : null,
+          leftCanReceive ? { label: `⬅ Sol Panele Taşı${countTag}`, onClick: () => enqueueTransfer('move', dualSelPaths, tab.path) } : null,
+          leftCanReceive ? { label: `📋 Sol Panele Kopyala${countTag}`, onClick: () => enqueueTransfer('copy', dualSelPaths, tab.path) } : null,
+          multiCount === 1 && state.basket.size > 0 && isDir ? { label: `🧺 Sepettekileri Buraya Taşı (${state.basket.size})`, bold: true, onClick: () => transferBasketTo(p, 'move') } : null,
+          multiCount === 1 && state.basket.size > 0 && isDir ? { label: `🧺 Sepettekileri Buraya Kopyala (${state.basket.size})`, onClick: () => transferBasketTo(p, 'copy') } : null,
+          { label: `🧺 Sepete Ekle / Çıkar${countTag}`, onClick: () => toggleSelectedInBasket(dualSelItems.length ? dualSelItems : [dualItem]) },
           { sep: true },
-          leftCanReceive ? { label: '⬅ Sol Panele Taşı', onClick: () => enqueueTransfer('move', [p], tab.path) } : null,
-          leftCanReceive ? { label: '📋 Sol Panele Kopyala', onClick: () => enqueueTransfer('copy', [p], tab.path) } : null,
-          state.basket.size > 0 && isDir ? { label: `🧺 Sepettekileri Buraya Taşı (${state.basket.size})`, bold: true, onClick: () => transferBasketTo(p, 'move') } : null,
-          state.basket.size > 0 && isDir ? { label: `🧺 Sepettekileri Buraya Kopyala (${state.basket.size})`, onClick: () => transferBasketTo(p, 'copy') } : null,
-          { label: '✂️ Kes', onClick: () => setClipboard('cut', [p]) },
-          { label: '📋 Kopyala', onClick: () => setClipboard('copy', [p]) },
+          { label: `✂️ Kes${countTag}`, shortcut: 'Ctrl+X', onClick: () => setClipboard('cut', dualSelPaths) },
+          { label: `📋 Kopyala${countTag}`, shortcut: 'Ctrl+C', onClick: () => setClipboard('copy', dualSelPaths) },
+          { label: multiCount > 1 ? `✏️ Toplu Yeniden Adlandır (${multiCount})` : '✏️ Yeniden Adlandır', shortcut: 'F2', onClick: () => renameSelected(dualSelItems.length ? dualSelItems : [dualItem]) },
           { sep: true },
-          { label: '📂 Bulunduğu Yeri Aç', onClick: () => revealInExplorer(p) },
-          { label: '🔗 Yolu Kopyala', onClick: () => { navigator.clipboard.writeText(p); toast('Yol kopyalandı'); } },
+          multiCount === 1 ? { label: '📂 Bulunduğu Yeri Aç', onClick: () => revealInExplorer(p) } : null,
+          { label: multiCount > 1 ? `🔗 Yolları Kopyala (${multiCount})` : '🔗 Yolu Kopyala', onClick: () => { navigator.clipboard.writeText(dualSelPaths.join('\n')); toast('Yol kopyalandı'); } },
           { sep: true },
-          { label: '🗑️ Çöpe At', danger: true, onClick: () => deleteSelected(false, [p]) },
-          { label: '🔥 Kalıcı Sil', danger: true, onClick: () => deleteSelected(true, [p]) },
+          { label: `🗑️ Çöpe At${countTag}`, shortcut: 'Del', danger: true, onClick: () => deleteSelected(false, dualSelPaths) },
+          { label: `🔥 Kalıcı Sil${countTag}`, shortcut: 'Shift+Del', danger: true, onClick: () => deleteSelected(true, dualSelPaths) },
           { sep: true },
-          { label: 'ℹ️ Dosya Bilgisi / Özellikler', onClick: () => showPropertiesModal([p]) },
+          { label: `ℹ️ Özellikler${countTag}`, shortcut: 'Alt+Enter', onClick: () => showPropertiesModal(dualSelPaths) },
         ]);
       } else if (state.dualPath) {
         showCustomContextMenu(e, [
           state.basket.size > 0 ? { label: `🧺 Sepettekileri Buraya Taşı (${state.basket.size})`, bold: true, onClick: () => transferBasketTo(state.dualPath, 'move') } : null,
           state.basket.size > 0 ? { label: `🧺 Sepettekileri Buraya Kopyala (${state.basket.size})`, onClick: () => transferBasketTo(state.dualPath, 'copy') } : null,
           state.basket.size > 0 ? { sep: true } : null,
-          { label: '📥 Buraya Yapıştır', disabled: state.clipboard.paths.length === 0, onClick: () => enqueueTransfer(state.clipboard.op, state.clipboard.paths, state.dualPath) },
+          { label: '📥 Buraya Yapıştır', shortcut: 'Ctrl+V', onClick: () => pasteToCurrentFolder(state.dualPath) },
           { label: '📁 Yeni Klasör', onClick: () => $('dual-btn-mkdir').click() },
           { label: '🔄 Yenile', onClick: () => navigateDual(state.dualPath, false) },
           { label: '📂 Bulunduğu Yeri Aç', onClick: () => revealInExplorer(state.dualPath) },
@@ -5257,6 +5982,97 @@ function bindEvents() {
   $('btn-ql-close').onclick = closeQuickLook;
   $('btn-ql-basket').onclick = triageQuickLookBasket;
   $('btn-ql-delete').onclick = () => triageQuickLookDelete(false);
+  if ($('btn-ql-frame-prev')) $('btn-ql-frame-prev').onclick = (e) => stepQuickLookVideoFrame(e?.shiftKey ? -5 : -1);
+  if ($('btn-ql-frame-next')) $('btn-ql-frame-next').onclick = (e) => stepQuickLookVideoFrame(e?.shiftKey ? 5 : 1);
+  if ($('btn-ql-capture')) $('btn-ql-capture').onclick = captureQuickLookFrame;
+  if ($('btn-ql-trim-toggle')) $('btn-ql-trim-toggle').onclick = toggleQuickLookTrimBar;
+  if ($('btn-ql-trim-close')) $('btn-ql-trim-close').onclick = () => $('ql-trim-bar')?.classList.add('hidden');
+  if ($('btn-ql-set-start')) {
+    $('btn-ql-set-start').onclick = () => {
+      const vid = $('ql-stage')?.querySelector('video');
+      if (vid && $('ql-trim-start')) {
+        $('ql-trim-start').value = Number(vid.currentTime || 0).toFixed(1);
+        updateTrimDurationUi();
+      }
+    };
+  }
+  if ($('btn-ql-set-end')) {
+    $('btn-ql-set-end').onclick = () => {
+      const vid = $('ql-stage')?.querySelector('video');
+      if (vid && $('ql-trim-end')) {
+        $('ql-trim-end').value = Number(vid.currentTime || 0).toFixed(1);
+        updateTrimDurationUi();
+      }
+    };
+  }
+  if ($('ql-trim-start')) $('ql-trim-start').oninput = updateTrimDurationUi;
+  if ($('ql-trim-end')) $('ql-trim-end').oninput = updateTrimDurationUi;
+  if ($('btn-ql-trim-preview')) {
+    $('btn-ql-trim-preview').onclick = () => {
+      const vid = $('ql-stage')?.querySelector('video');
+      if (!vid) return;
+      if (state.qlTrimPreviewLoop) {
+        vid.pause();
+        state.qlTrimPreviewLoop = false;
+        updateTrimPreviewBtnUi();
+        return;
+      }
+      const startSec = Number($('ql-trim-start')?.value || 0);
+      const endSec = Number($('ql-trim-end')?.value || 0);
+      if (endSec <= startSec + 0.1) return toast('Önizleme için Bitiş > Başlangıç olmalı', 'error');
+      vid.currentTime = startSec;
+      state.qlTrimPreviewLoop = true;
+      updateTrimPreviewBtnUi();
+      vid.play().catch(() => {});
+    };
+  }
+  const trimTrack = $('ql-trim-track');
+  if (trimTrack) {
+    let dragMode = null; // 'a' | 'b' | 'seek'
+    const applyTrackPointer = (clientX, mode) => {
+      const vid = $('ql-stage')?.querySelector('video');
+      const rect = trimTrack.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+      const dur = getTrimVideoDuration(vid);
+      const t = ratio * dur;
+      if (mode === 'a') {
+        const endSec = Number($('ql-trim-end')?.value || dur);
+        const clamped = Math.max(0, Math.min(Math.max(0, endSec - 0.1), t));
+        $('ql-trim-start').value = clamped.toFixed(1);
+        if (vid) vid.currentTime = clamped;
+        updateTrimDurationUi();
+      } else if (mode === 'b') {
+        const startSec = Number($('ql-trim-start')?.value || 0);
+        const clamped = Math.min(dur, Math.max(Math.min(dur, startSec + 0.1), t));
+        $('ql-trim-end').value = clamped.toFixed(1);
+        if (vid) vid.currentTime = clamped;
+        updateTrimDurationUi();
+      } else if (vid) {
+        vid.currentTime = t;
+        updateTrimPlayheadUi();
+      }
+    };
+    trimTrack.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest('#ql-trim-handle-a')) dragMode = 'a';
+      else if (e.target.closest('#ql-trim-handle-b')) dragMode = 'b';
+      else dragMode = 'seek';
+      try { trimTrack.setPointerCapture(e.pointerId); } catch {}
+      applyTrackPointer(e.clientX, dragMode);
+    });
+    trimTrack.addEventListener('pointermove', (e) => {
+      if (!dragMode) return;
+      applyTrackPointer(e.clientX, dragMode);
+    });
+    const endTrackDrag = (e) => {
+      if (!dragMode) return;
+      dragMode = null;
+      try { trimTrack.releasePointerCapture(e.pointerId); } catch {}
+    };
+    trimTrack.addEventListener('pointerup', endTrackDrag);
+    trimTrack.addEventListener('pointercancel', endTrackDrag);
+  }
+  if ($('btn-ql-trim-run')) $('btn-ql-trim-run').onclick = runQuickLookTrim;
   $('btn-ql-zoom-in').onclick = () => setQuickLookZoom(state.qlZoom * 1.25);
   $('btn-ql-zoom-out').onclick = () => setQuickLookZoom(state.qlZoom / 1.25);
   $('btn-ql-zoom-reset').onclick = () => setQuickLookZoom(1);
@@ -5385,7 +6201,21 @@ function bindEvents() {
       else if (e.key === '-') { e.preventDefault(); setQuickLookZoom(state.qlZoom / 1.25); }
       else if (e.key === '0') { e.preventDefault(); setQuickLookZoom(1); }
       else if (e.key.toLowerCase() === 'b') { e.preventDefault(); triageQuickLookBasket(); }
+      else if (e.key.toLowerCase() === 's') { e.preventDefault(); captureQuickLookFrame(); }
+      else if (!isInput && (e.key === ',' || e.key === '<')) { e.preventDefault(); stepQuickLookVideoFrame(e.shiftKey ? -5 : -1); }
+      else if (!isInput && (e.key === '.' || e.key === '>')) { e.preventDefault(); stepQuickLookVideoFrame(e.shiftKey ? 5 : 1); }
       else if (e.key === 'Delete') { e.preventDefault(); triageQuickLookDelete(e.shiftKey); }
+      return;
+    }
+
+    if (e.ctrlKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      openCommandPalette();
+      return;
+    }
+    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      toggleDragShelfVisible();
       return;
     }
 
@@ -5436,56 +6266,93 @@ function bindEvents() {
 
     const activeTab = getActiveTab();
     const inTrash = activeTab && activeTab.path === 'TRASH';
+    const inDual = Boolean(state.dualOpen && state.activePane === 'dual');
 
     if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
       e.preventDefault();
       performUndo();
     } else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'n') {
       e.preventDefault();
-      if (!inTrash) createNewFolder();
+      if (inDual) $('dual-btn-mkdir').click();
+      else if (!inTrash) createNewFolder();
     } else if (e.ctrlKey && e.key.toLowerCase() === 'a') {
       e.preventDefault();
-      for (const it of state.viewItems) state.selectedPaths.add(it.path);
-      renderVirtualList();
-      updateStatusCounts();
-      updateToolbarButtons();
+      if (inDual) {
+        for (const it of state.dualItems) state.dualSelectedPaths.add(it.path);
+        updateDualSelectionDomInPlace();
+      } else {
+        for (const it of state.viewItems) state.selectedPaths.add(it.path);
+        renderVirtualList();
+        updateStatusCounts();
+        updateToolbarButtons();
+      }
     } else if (e.ctrlKey && e.key.toLowerCase() === 'c') {
       e.preventDefault();
-      if (!inTrash) setClipboard('copy');
+      if (inDual) setClipboard('copy', Array.from(state.dualSelectedPaths));
+      else if (!inTrash) setClipboard('copy');
     } else if (e.ctrlKey && e.key.toLowerCase() === 'x') {
       e.preventDefault();
-      if (!inTrash) setClipboard('cut');
+      if (inDual) setClipboard('cut', Array.from(state.dualSelectedPaths));
+      else if (!inTrash) setClipboard('cut');
     } else if (e.ctrlKey && e.key.toLowerCase() === 'v') {
       e.preventDefault();
-      if (!inTrash) pasteToCurrentFolder();
+      if (inDual) pasteToCurrentFolder(state.dualPath);
+      else if (!inTrash) pasteToCurrentFolder();
     } else if (e.key === 'F2') {
       e.preventDefault();
-      if (!inTrash) renameSelected();
+      if (inDual) renameSelected(getDualSelectedItems());
+      else if (!inTrash) renameSelected();
     } else if (e.key === 'Delete') {
       e.preventDefault();
-      if (inTrash) deleteFromTrash();
+      if (inDual) deleteSelected(e.shiftKey, Array.from(state.dualSelectedPaths));
+      else if (inTrash) deleteFromTrash();
       else deleteSelected(e.shiftKey);
     } else if (e.key === 'Backspace') {
       e.preventDefault();
-      $('btn-up').click();
+      if (inDual) $('dual-btn-up').click();
+      else $('btn-up').click();
     } else if (e.key === ' ') {
       e.preventDefault();
-      if (!inTrash) {
+      if (inDual) {
+        const sel = getDualSelectedItems();
+        if (sel.length > 0 && !sel[0].isDir) openQuickLook(sel[0], state.dualItems);
+      } else if (!inTrash) {
         const sel = getSelectedItems();
         if (sel.length > 0 && !sel[0].isDir) openQuickLook(sel[0]);
       }
     } else if (e.altKey && e.key === 'Enter') {
       e.preventDefault();
-      if (!inTrash) showPropertiesModal();
+      if (inDual) showPropertiesModal(Array.from(state.dualSelectedPaths));
+      else if (!inTrash) showPropertiesModal();
     } else if (e.key === 'Enter') {
-      const sel = getSelectedItems();
-      if (sel.length === 1) {
-        activateItem(sel[0]);
+      if (inDual) {
+        const sel = getDualSelectedItems();
+        if (sel.length === 1) {
+          if (sel[0].isDir) navigateDual(sel[0].path);
+          else openExternally(sel[0].path);
+        }
+      } else {
+        const sel = getSelectedItems();
+        if (sel.length === 1) {
+          activateItem(sel[0]);
+        }
       }
     } else if (e.key.toLowerCase() === 'b' && !e.ctrlKey) {
       e.preventDefault();
-      if (!inTrash) toggleSelectedInBasket();
+      if (inDual) toggleSelectedInBasket(getDualSelectedItems());
+      else if (!inTrash) toggleSelectedInBasket();
     } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (inDual) {
+        if (state.dualItems.length === 0) return;
+        e.preventDefault();
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        const next = Math.max(0, Math.min(state.dualItems.length - 1, state.dualLastClickedIdx + step));
+        handleDualItemSelect(next, e);
+        const listEl = $('dual-list');
+        const rowEl = listEl?.querySelector(`.dual-row[data-index="${next}"]`);
+        if (rowEl) rowEl.scrollIntoView({ block: 'nearest' });
+        return;
+      }
       if (state.viewItems.length === 0) return;
       e.preventDefault();
       const step = e.key === 'ArrowDown' ? 1 : -1;
@@ -5789,6 +6656,15 @@ function syncSettingsForm() {
   setVal('set-trash-confirm', s.trashConfirmMode || 'bulk');
   setVal('set-auto-close-proc', s.autoCloseProcessModal, true);
   setVal('set-default-thumb', s.defaultThumbMode || 'off');
+  setVal('set-dblclick-quicklook', s.dblClickQuickLook !== false, true);
+  setVal('set-frame-save-mode', s.frameSaveMode || 'same');
+  setVal('set-frame-save-dir', s.frameSaveDir || '');
+  const frameRow = $('set-frame-save-custom-row');
+  if (frameRow) frameRow.classList.toggle('hidden', (s.frameSaveMode || 'same') !== 'custom');
+  setVal('set-trim-save-mode', s.trimSaveMode || 'same');
+  setVal('set-trim-save-dir', s.trimSaveDir || '');
+  const trimRow = $('set-trim-save-custom-row');
+  if (trimRow) trimRow.classList.toggle('hidden', (s.trimSaveMode || 'same') !== 'custom');
   setVal('set-video-autoplay', s.videoAutoplay !== false, true);
   setVal('set-video-loop', s.videoLoop, true);
   applyAppSettings();
@@ -6014,6 +6890,7 @@ function openSettingsDialog() {
 function loadUiPrefs() {
   loadDashHistory();
   loadRecentTransferTargets();
+  loadSmartViews();
   loadFolderViews();
   loadColumnWidths();
   try {
@@ -6067,6 +6944,12 @@ function loadUiPrefs() {
   updateListHeaderIndicators();
 }
 
+function shouldOpenInQuickLook(item) {
+  if (!item || item.isDir) return false;
+  if (state.settings.dblClickQuickLook === false) return false;
+  return item.category === 'image' || item.category === 'video';
+}
+
 async function activateItem(item) {
   if (!item) return;
   const now = Date.now();
@@ -6083,6 +6966,7 @@ async function activateItem(item) {
     return;
   }
   if (item.isDir) navigateTo(item.path);
+  else if (shouldOpenInQuickLook(item)) openQuickLook(item);
   else openExternally(item.path);
 }
 
@@ -6090,12 +6974,12 @@ async function activateItem(item) {
 function isDragFileHandle(target, rowEl) {
   if (!rowEl) return false;
   if (rowEl.classList.contains('selected')) return true;
-  return Boolean(target.closest('.fr-icon, .fr-thumb, .fr-text, .tile-thumb-box, .tile-name, .grid-preview img, .grid-preview span, .grid-name, .compact-cell span'));
+  return Boolean(target.closest('.fr-icon, .fr-thumb, .fr-text, .tile-thumb-box, .tile-name, .grid-preview img, .grid-preview span, .grid-name, .compact-cell span, .dual-row-icon, .dual-row-name'));
 }
 
-function setupMarqueeSelection() {
-  const vp = $('virtual-viewport');
-  const box = $('marquee-box');
+function attachRubberBandController(cfg) {
+  const { container, rowSelector, getBox, canStart, isDragHandle, getBaseSelection, onBeforeStart, onSelectionBox } = cfg;
+  if (!container) return;
   let active = false;
   let dragging = false;
   let startX = 0;
@@ -6105,101 +6989,79 @@ function setupMarqueeSelection() {
   let baseSelection = new Set();
   let autoScrollTimer = null;
 
-  const updateMarqueeSelection = () => {
-    const vpRect = vp.getBoundingClientRect();
-    const curX = Math.max(0, Math.min(vp.clientWidth, lastClientX - vpRect.left));
-    const curY = Math.max(0, Math.min(vp.scrollHeight, lastClientY - vpRect.top + vp.scrollTop));
+  const updateBoxAndSelection = () => {
+    const box = getBox();
+    const rect = container.getBoundingClientRect();
+    const curX = Math.max(0, Math.min(container.clientWidth, lastClientX - rect.left));
+    const curY = Math.max(0, Math.min(container.scrollHeight, lastClientY - rect.top + container.scrollTop));
 
-    const left = Math.min(startX, curX);
-    const right = Math.max(startX, curX);
-    const top = Math.min(startY, curY);
-    const bottom = Math.max(startY, curY);
+    const bounds = {
+      left: Math.min(startX, curX),
+      right: Math.max(startX, curX),
+      top: Math.min(startY, curY),
+      bottom: Math.max(startY, curY),
+    };
 
-    box.style.left = `${left}px`;
-    box.style.top = `${top}px`;
-    box.style.width = `${right - left}px`;
-    box.style.height = `${bottom - top}px`;
+    box.style.left = `${bounds.left}px`;
+    box.style.top = `${bounds.top}px`;
+    box.style.width = `${bounds.right - bounds.left}px`;
+    box.style.height = `${bounds.bottom - bounds.top}px`;
 
-    const metrics = getLayoutMetrics();
-    const total = state.viewItems.length;
-    const nextSel = new Set(baseSelection);
-
-    if (total > 0) {
-      const startRow = Math.max(0, Math.floor(top / metrics.rowHeight));
-      const endRow = Math.min(Math.ceil(total / metrics.cols) - 1, Math.floor(bottom / metrics.rowHeight));
-      const colWidth = vp.clientWidth / metrics.cols;
-
-      for (let r = startRow; r <= endRow; r++) {
-        for (let c = 0; c < metrics.cols; c++) {
-          const idx = r * metrics.cols + c;
-          if (idx >= total) break;
-          const itemLeft = c * colWidth + 6;
-          const itemRight = (c + 1) * colWidth - 6;
-          if (metrics.cols === 1 || (right >= itemLeft && left <= itemRight)) {
-            nextSel.add(state.viewItems[idx].path);
-          }
-        }
-      }
-    }
-
-    state.selectedPaths = nextSel;
-    updateSelectionDomInPlace();
-    updateStatusCounts();
-    updateToolbarButtons();
+    onSelectionBox(bounds, baseSelection);
   };
 
-  vp.addEventListener('mousedown', (e) => {
+  container.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    if (e.target.type === 'checkbox' || e.target.classList.contains('eye-btn')) return;
-    // Scrollbar tıklamasını yoksay
-    if (e.clientX > vp.getBoundingClientRect().left + vp.clientWidth) return;
+    if (canStart && !canStart(e)) return;
+    if (e.clientX > container.getBoundingClientRect().left + container.clientWidth) return;
 
-    const rowEl = e.target.closest('[data-index]');
-    if (!e.altKey && isDragFileHandle(e.target, rowEl)) {
+    const rowEl = e.target.closest(rowSelector);
+    if (!e.altKey && isDragHandle(e.target, rowEl)) {
       if (rowEl) rowEl.draggable = true;
       return;
     }
 
     if (rowEl) rowEl.draggable = false;
-    const vpRect = vp.getBoundingClientRect();
+    if (onBeforeStart) onBeforeStart(e);
+    const rect = container.getBoundingClientRect();
     active = true;
     dragging = false;
-    startX = e.clientX - vpRect.left;
-    startY = e.clientY - vpRect.top + vp.scrollTop;
+    startX = e.clientX - rect.left;
+    startY = e.clientY - rect.top + container.scrollTop;
     lastClientX = e.clientX;
     lastClientY = e.clientY;
-    baseSelection = e.ctrlKey || e.shiftKey ? new Set(state.selectedPaths) : new Set();
+    baseSelection = getBaseSelection(e);
   });
 
   window.addEventListener('mousemove', (e) => {
     if (!active) return;
     lastClientX = e.clientX;
     lastClientY = e.clientY;
-    const vpRect = vp.getBoundingClientRect();
-    const curX = e.clientX - vpRect.left;
-    const curY = e.clientY - vpRect.top + vp.scrollTop;
+    const rect = container.getBoundingClientRect();
+    const curX = e.clientX - rect.left;
+    const curY = e.clientY - rect.top + container.scrollTop;
 
     if (!dragging) {
       if (Math.hypot(curX - startX, curY - startY) < 5) return;
       dragging = true;
-      box.classList.remove('hidden');
+      getBox().classList.remove('hidden');
       autoScrollTimer = setInterval(() => {
         if (!dragging) return;
-        const rect = vp.getBoundingClientRect();
+        const r = container.getBoundingClientRect();
         let scrolled = false;
-        if (lastClientY < rect.top + 32) {
-          vp.scrollTop -= 18;
+        if (lastClientY < r.top + 32) {
+          container.scrollTop -= 18;
           scrolled = true;
-        } else if (lastClientY > rect.bottom - 32) {
-          vp.scrollTop += 18;
+        } else if (lastClientY > r.bottom - 32) {
+          container.scrollTop += 18;
           scrolled = true;
         }
-        if (scrolled) updateMarqueeSelection();
+        if (scrolled) updateBoxAndSelection();
       }, 30);
     }
 
     e.preventDefault();
-    updateMarqueeSelection();
+    updateBoxAndSelection();
   });
 
   window.addEventListener('mouseup', () => {
@@ -6209,11 +7071,82 @@ function setupMarqueeSelection() {
     autoScrollTimer = null;
     if (dragging) {
       dragging = false;
-      box.classList.add('hidden');
+      getBox().classList.add('hidden');
       state.suppressNextClick = true;
       setTimeout(() => { state.suppressNextClick = false; }, 100);
     }
-    vp.querySelectorAll('[data-index]').forEach((el) => { el.draggable = true; });
+    container.querySelectorAll(rowSelector).forEach((el) => { el.draggable = true; });
+  });
+}
+
+function setupMarqueeSelection() {
+  const vp = $('virtual-viewport');
+  attachRubberBandController({
+    container: vp,
+    rowSelector: '[data-index]',
+    getBox: () => $('marquee-box'),
+    canStart: (e) => e.target.type !== 'checkbox' && !e.target.classList.contains('eye-btn'),
+    isDragHandle: isDragFileHandle,
+    getBaseSelection: (e) => (e.ctrlKey || e.shiftKey ? new Set(state.selectedPaths) : new Set()),
+    onBeforeStart: () => { state.activePane = 'left'; },
+    onSelectionBox: ({ left, right, top, bottom }, baseSelection) => {
+      const metrics = getLayoutMetrics();
+      const total = state.viewItems.length;
+      const nextSel = new Set(baseSelection);
+      if (total > 0) {
+        const startRow = Math.max(0, Math.floor(top / metrics.rowHeight));
+        const endRow = Math.min(Math.ceil(total / metrics.cols) - 1, Math.floor(bottom / metrics.rowHeight));
+        const colWidth = vp.clientWidth / metrics.cols;
+        for (let r = startRow; r <= endRow; r++) {
+          for (let c = 0; c < metrics.cols; c++) {
+            const idx = r * metrics.cols + c;
+            if (idx >= total) break;
+            const itemLeft = c * colWidth + 6;
+            const itemRight = (c + 1) * colWidth - 6;
+            if (metrics.cols === 1 || (right >= itemLeft && left <= itemRight)) {
+              nextSel.add(state.viewItems[idx].path);
+            }
+          }
+        }
+      }
+      state.selectedPaths = nextSel;
+      updateSelectionDomInPlace();
+      updateStatusCounts();
+      updateToolbarButtons();
+    },
+  });
+
+  const dualList = $('dual-list');
+  attachRubberBandController({
+    container: dualList,
+    rowSelector: '.dual-row[data-index]',
+    getBox: () => {
+      let b = $('dual-marquee-box');
+      if (!b) {
+        b = document.createElement('div');
+        b.id = 'dual-marquee-box';
+        b.className = 'marquee-box hidden';
+      }
+      if (b.parentElement !== dualList) dualList.appendChild(b);
+      return b;
+    },
+    isDragHandle: isDragFileHandle,
+    getBaseSelection: (e) => (e.ctrlKey || e.shiftKey ? new Set(state.dualSelectedPaths) : new Set()),
+    onBeforeStart: () => { state.activePane = 'dual'; },
+    onSelectionBox: ({ top, bottom }, baseSelection) => {
+      const nextSel = new Set(baseSelection);
+      const rows = dualList.querySelectorAll('.dual-row[data-index]');
+      for (const row of rows) {
+        const rowTop = row.offsetTop;
+        const rowBottom = rowTop + row.offsetHeight;
+        if (rowTop <= bottom && rowBottom >= top) {
+          const item = state.dualItems[Number(row.dataset.index)];
+          if (item) nextSel.add(item.path);
+        }
+      }
+      state.dualSelectedPaths = nextSel;
+      updateDualSelectionDomInPlace();
+    },
   });
 }
 
@@ -6416,6 +7349,10 @@ function setupDragAndDrop() {
           return { kind: 'dir', dir: crumb.dataset.path, op, highlightEl: crumb };
         }
       }
+      const shelfEl = el.closest('#drag-shelf');
+      if (shelfEl) {
+        return { kind: 'shelf', op: 'copy', highlightEl: shelfEl };
+      }
       const basketEl = el.closest('#btn-basket, #basket-drawer');
       if (basketEl) {
         return { kind: 'basket', op: 'copy', highlightEl: basketEl };
@@ -6429,9 +7366,9 @@ function setupDragAndDrop() {
           return { kind: 'dir', dir: tDir, op, highlightEl: dRow || dList };
         }
       }
-      if (vp.contains(el) && state.dragSource === 'dual') {
+      if (vp.contains(el) && (state.dragSource === 'dual' || state.dragSource === 'shelf')) {
         const tab = getActiveTab();
-        if (tab && tab.path !== 'PC') {
+        if (tab && tab.path !== 'PC' && tab.path !== 'TRASH') {
           const op = resolveDragOp(state.draggedPaths, tab.path, ctrlKey, shiftKey);
           if (canDropInto(tab.path, op === 'copy')) {
             return { kind: 'dir', dir: tab.path, op, highlightEl: null };
@@ -6456,6 +7393,7 @@ function setupDragAndDrop() {
     };
 
     vp.addEventListener('pointerdown', (e) => {
+      state.activePane = 'left';
       if (e.button !== 0 || e.altKey) return;
       if (e.target.closest('button, input, a, .eye-btn, .lh-resizer')) return;
       const rowEl = e.target.closest('[data-index]');
@@ -6468,10 +7406,13 @@ function setupDragAndDrop() {
 
     if (dualList) {
       dualList.addEventListener('pointerdown', (e) => {
+        state.activePane = 'dual';
         if (e.button !== 0 || e.altKey) return;
         const row = e.target.closest('.dual-row[data-path]');
-        if (!row) return;
-        beginPointerDrag(e, [row.dataset.path], 'dual');
+        if (!row || !isDragFileHandle(e.target, row)) return;
+        const p = row.dataset.path;
+        const paths = state.dualSelectedPaths.has(p) ? Array.from(state.dualSelectedPaths) : [p];
+        beginPointerDrag(e, paths, 'dual');
       });
     }
 
@@ -6500,6 +7441,7 @@ function setupDragAndDrop() {
           updateToolbarButtons();
         }
         try { pState.captureEl.setPointerCapture(pState.pointerId); } catch {}
+        setShelfAutoReveal(true);
         ghostEl = document.createElement('div');
         ghostEl.className = 'drag-ghost-pill';
         document.body.appendChild(ghostEl);
@@ -6510,6 +7452,7 @@ function setupDragAndDrop() {
         pState.handedOff = true;
         const dragPaths = state.draggedPaths.slice();
         cleanupPointerDrag();
+        setShelfAutoReveal(false);
         state.suppressNextClick = true;
         setTimeout(() => { state.suppressNextClick = false; }, 120);
         window.chrome.webview.postMessage({ type: 'startNativeFileDrag', paths: dragPaths });
@@ -6519,7 +7462,7 @@ function setupDragAndDrop() {
       const hit = findInAppDropTarget(e.clientX, e.clientY, e.ctrlKey, e.shiftKey);
       if (ghostEl) {
         const isCopyOp = hit ? (hit.op === 'copy') : e.ctrlKey;
-        const prefix = isCopyOp ? '📋 Kopyala: ' : '📦 Taşı: ';
+        const prefix = hit && hit.kind === 'shelf' ? '🧲 Rafa Park Et: ' : (isCopyOp ? '📋 Kopyala: ' : '📦 Taşı: ');
         const label = state.draggedPaths.length === 1
           ? getFolderTitle(state.draggedPaths[0])
           : `${state.draggedPaths.length} öğe`;
@@ -6548,6 +7491,14 @@ function setupDragAndDrop() {
       }
     });
 
+    const shelfHandle = $('drag-shelf-drag-handle');
+    if (shelfHandle) {
+      shelfHandle.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || state.shelfItems.size === 0) return;
+        beginPointerDrag(e, Array.from(state.shelfItems.keys()), 'shelf');
+      });
+    }
+
     window.addEventListener('pointerup', (e) => {
       if (!pState) return;
       if (!pState.active) {
@@ -6559,6 +7510,10 @@ function setupDragAndDrop() {
         return;
       }
       const dragPaths = state.draggedPaths.slice();
+      const dragSource = state.dragSource;
+      const dragPool = dragSource === 'dual'
+        ? state.dualItems
+        : (dragSource === 'shelf' ? Array.from(state.shelfItems.values()) : state.viewItems);
       const hit = findInAppDropTarget(e.clientX, e.clientY, e.ctrlKey, e.shiftKey);
       cleanupPointerDrag();
       state.draggedPaths = [];
@@ -6566,13 +7521,22 @@ function setupDragAndDrop() {
       state.suppressNextClick = true;
       setTimeout(() => { state.suppressNextClick = false; }, 120);
 
-      if (hit && hit.kind === 'basket') {
+      if (hit && hit.kind === 'shelf') {
         const draggedSet = new Set(dragPaths);
-        const matched = state.viewItems.filter((it) => draggedSet.has(it.path));
+        const matched = dragPool.filter((it) => draggedSet.has(it.path));
+        addItemsToShelf(matched.length > 0 ? matched : dragPaths);
+      } else if (hit && hit.kind === 'basket') {
+        const draggedSet = new Set(dragPaths);
+        const matched = dragPool.filter((it) => draggedSet.has(it.path));
         if (matched.length > 0) addItemsToBasket(matched);
       } else if (hit && hit.kind === 'dir') {
         executeDropPaths(dragPaths, hit.dir, hit.op === 'copy');
+        if (dragSource === 'shelf' && hit.op !== 'copy') {
+          for (const dp of dragPaths) state.shelfItems.delete(dp);
+          renderDragShelf();
+        }
       }
+      setShelfAutoReveal(false);
     });
 
     window.chrome.webview.addEventListener('message', (ev) => {
@@ -6772,10 +7736,11 @@ function setupDragAndDrop() {
     dualList.addEventListener('dragstart', (e) => {
       const row = e.target.closest('.dual-row');
       if (!row) return;
-      state.draggedPaths = [row.dataset.path];
+      const p = row.dataset.path;
+      state.draggedPaths = state.dualSelectedPaths.has(p) ? Array.from(state.dualSelectedPaths) : [p];
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = 'copyMove';
-        e.dataTransfer.setData('text/plain', row.dataset.path);
+        e.dataTransfer.setData('text/plain', state.draggedPaths[0] || p);
       }
     });
   }
@@ -6885,11 +7850,438 @@ function setupViewportResizeObserver() {
   window.addEventListener('resize', onChange);
 }
 
+function toggleDragShelfVisible(forceShow = null) {
+  const shelf = $('drag-shelf');
+  if (!shelf) return;
+  const shouldShow = forceShow !== null ? forceShow : shelf.classList.contains('hidden');
+  state.shelfPinned = shouldShow;
+  shelf.classList.toggle('hidden', !shouldShow);
+  if (shouldShow) renderDragShelf();
+}
+
+function bindDragShelfHandlers() {
+  const shelf = $('drag-shelf');
+  const btnToggle = $('btn-toggle-shelf');
+  const btnClose = $('btn-shelf-close');
+  const btnClear = $('btn-shelf-clear');
+  const btnMoveHere = $('btn-shelf-move-here');
+  const btnCopyHere = $('btn-shelf-copy-here');
+  const handleEl = $('drag-shelf-drag-handle');
+
+  if (btnToggle) btnToggle.onclick = () => toggleDragShelfVisible();
+  if (btnClose) {
+    btnClose.onclick = () => {
+      state.shelfPinned = false;
+      shelf?.classList.add('hidden');
+    };
+  }
+  if (btnClear) btnClear.onclick = clearDragShelf;
+
+  const transferShelfToCur = async (op) => {
+    const tab = getActiveTab();
+    if (!tab || !tab.path || tab.path === 'PC' || tab.path === 'TRASH') {
+      return toast('Geçerli bir hedef klasör açın', 'error');
+    }
+    const paths = Array.from(state.shelfItems.keys());
+    if (paths.length === 0) return;
+    await enqueueTransfer(op, paths, tab.path);
+    if (op === 'move') clearDragShelf();
+  };
+  if (btnMoveHere) btnMoveHere.onclick = () => transferShelfToCur('move');
+  if (btnCopyHere) btnCopyHere.onclick = () => transferShelfToCur('copy');
+
+  if (shelf) {
+    shelf.addEventListener('dragover', (e) => {
+      if (!state.draggedPaths.length) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      shelf.classList.add('drop-active');
+    });
+    shelf.addEventListener('dragleave', (e) => {
+      if (!shelf.contains(e.relatedTarget)) shelf.classList.remove('drop-active');
+    });
+    shelf.addEventListener('drop', (e) => {
+      shelf.classList.remove('drop-active');
+      if (!state.draggedPaths.length) return;
+      e.preventDefault();
+      const draggedSet = new Set(state.draggedPaths);
+      const matched = state.viewItems.filter((it) => draggedSet.has(it.path));
+      addItemsToShelf(matched.length > 0 ? matched : state.draggedPaths);
+    });
+  }
+  if (handleEl) {
+    handleEl.addEventListener('dragstart', (e) => {
+      if (state.shelfItems.size === 0) { e.preventDefault(); return; }
+      state.draggedPaths = Array.from(state.shelfItems.keys());
+      state.dragSource = 'shelf';
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'copyMove';
+        e.dataTransfer.setData('text/plain', state.draggedPaths.join('\n'));
+      }
+    });
+  }
+}
+
+let cmdPaletteActiveIdx = 0;
+let cmdPaletteEntries = [];
+
+function buildCommandPaletteEntries(rawQuery) {
+  const q = String(rawQuery || '').trim();
+  const qLow = q.toLocaleLowerCase('tr-TR');
+  const results = [];
+
+  // 1) Hızlı Tek-Satır Akıllı Filtre Yorumlayıcı
+  if (q && (q.includes('>') || q.includes('<') || q.startsWith('.') || /\b(mb|gb|video|foto|görsel|bugün|kopya)\b/i.test(q))) {
+    results.push({
+      icon: '🎯',
+      title: `Klasörde Hızlı Filtre Uygula: "${q}"`,
+      sub: 'Gelişmiş Filtre Stüdyosu kriterlerini doldur ve uygula',
+      badge: 'Hızlı Filtre',
+      run: () => applyQuickStudioQuery(q),
+    });
+  }
+
+  const actions = [
+    { icon: '📅', title: 'Tarihe Göre Klasörle', sub: 'Dosyaları Yıl/Ay alt klasörlerine kopyala veya taşı', badge: 'Eylem', run: organizeCurrentFolderByDate },
+    { icon: '📊', title: 'Disk ve Klasör Analizi Aç', sub: 'Kategori dökümü ve en büyük dosyalar', badge: 'Eylem', run: () => openAnalyzer() },
+    { icon: '🧬', title: 'Kopya Dosyaları Bul', sub: 'Birebir aynı dosyaları bul ve temizle', badge: 'Eylem', run: () => findAndRenderDuplicates(false) },
+    { icon: '📏', title: 'Klasör Boyutlarını Hesapla', sub: 'Açık klasördeki alt klasör boyutlarını sırala', badge: 'Eylem', run: () => calculateCurrentFolderSizes(false) },
+    { icon: '◫', title: 'Çift Panel Aç / Kapat (F3)', sub: 'Yan yana dosya yönetimi', badge: 'Eylem', run: toggleDualPane },
+    { icon: '🧲', title: 'Geçici Yüzen Rafı Aç / Kapat (Ctrl+Shift+S)', sub: 'Dosyaları park edip başka klasöre taşı', badge: 'Eylem', run: () => toggleDragShelfVisible() },
+    { icon: '🎯', title: 'Gelişmiş Filtre & Aralık Stüdyosu', sub: 'Numara, tarih, boyut ve RegExp filtresi', badge: 'Eylem', run: () => $('btn-range-studio')?.click() },
+    { icon: '⚙️', title: 'Ayarlar Merkezi (Ctrl+,)', sub: 'Görünüm, medya ve Windows entegrasyonu', badge: 'Eylem', run: openSettingsDialog },
+    { icon: '🧹', title: 'Sepeti Temizle', sub: 'Toplama sepetindeki tüm öğeleri çıkar', badge: 'Eylem', run: () => { state.basket.clear(); renderBasket(); toast('Sepet temizlendi'); } },
+  ];
+
+  for (const act of actions) {
+    if (!qLow || act.title.toLocaleLowerCase('tr-TR').includes(qLow) || act.sub.toLocaleLowerCase('tr-TR').includes(qLow)) {
+      results.push(act);
+    }
+  }
+
+  for (const sv of state.smartViews || []) {
+    if (!qLow || sv.name.toLocaleLowerCase('tr-TR').includes(qLow)) {
+      results.push({
+        icon: sv.icon || '✨',
+        title: `Akıllı Klasör: ${sv.name}`,
+        sub: 'İndeksten anlık sanal görünüm',
+        badge: 'Sanal',
+        run: () => openSmartView(sv),
+      });
+    }
+  }
+
+  const seenPaths = new Set();
+  const addNav = (icon, name, p, badge) => {
+    if (!p || seenPaths.has(p.toLowerCase())) return;
+    seenPaths.add(p.toLowerCase());
+    if (!qLow || name.toLocaleLowerCase('tr-TR').includes(qLow) || p.toLocaleLowerCase('tr-TR').includes(qLow)) {
+      results.push({ icon, title: name, sub: p, badge, run: () => navigateTo(p) });
+    }
+  };
+  for (const d of state.drives || []) addNav('💽', d.label || d.path, d.path, 'Disk');
+  for (const qItem of state.quickAccess || []) addNav(QUICK_ICONS[qItem.icon] || '📁', qItem.name, qItem.path, 'Hızlı');
+  for (const pItem of state.pins || []) addNav('📌', pItem.name || getFolderTitle(pItem.path), pItem.path, 'Sabit');
+  for (const rt of state.recentTransferTargets || []) addNav('🕒', rt.name || getFolderTitle(rt.path), rt.path, 'Son Yol');
+
+  return results.slice(0, 24);
+}
+
+function applyQuickStudioQuery(q) {
+  const studio = $('range-studio');
+  if (studio && studio.classList.contains('hidden')) {
+    studio.classList.remove('hidden');
+    $('btn-range-studio')?.classList.add('active');
+  }
+  ['flt-pattern', 'flt-num-min', 'flt-num-max', 'flt-date-min', 'flt-date-max', 'flt-size-min', 'flt-size-max', 'flt-ext'].forEach((id) => {
+    if ($(id)) $(id).value = '';
+  });
+  $('flt-regex').checked = false;
+  $('flt-category').value = 'all';
+
+  let rest = String(q || '');
+  const szMatch = /([<>])\s*(\d+(?:\.\d+)?)\s*(kb|mb|gb)?/i.exec(rest);
+  if (szMatch) {
+    const mult = szMatch[3]?.toLowerCase() === 'gb' ? 1073741824 : (szMatch[3]?.toLowerCase() === 'kb' ? 1024 : 1048576);
+    if (szMatch[1] === '>') {
+      $('flt-size-min').value = szMatch[2];
+      $('flt-size-min-unit').value = String(mult);
+    } else {
+      $('flt-size-max').value = szMatch[2];
+      $('flt-size-max-unit').value = String(mult);
+    }
+    rest = rest.replace(szMatch[0], '');
+  }
+  if (/\bvideo\w*\b/i.test(rest)) { $('flt-category').value = 'video'; rest = rest.replace(/\bvideo\w*\b/gi, ''); }
+  else if (/\b(foto\w*|resim\w*|görsel\w*|img)\b/i.test(rest)) { $('flt-category').value = 'image'; rest = rest.replace(/\b(foto\w*|resim\w*|görsel\w*|img)\b/gi, ''); }
+  else if (/\bbugün\b/i.test(rest)) {
+    const today = new Date().toISOString().slice(0, 10);
+    $('flt-date-min').value = today;
+    $('flt-date-max').value = today;
+    rest = rest.replace(/\bbugün\b/gi, '');
+  }
+  else if (/\bkopya\b/i.test(rest)) {
+    $('flt-pattern').value = '\\(\\d+\\)\\.[^.]+$';
+    $('flt-regex').checked = true;
+    rest = rest.replace(/\bkopya\b/gi, '');
+  }
+  const extMatch = /(^|\s)(\.[a-z0-9]{2,6})\b/i.exec(rest);
+  if (extMatch) {
+    $('flt-ext').value = extMatch[2];
+    rest = rest.replace(extMatch[0], '');
+  }
+  const leftover = rest.trim();
+  if (leftover && !$('flt-pattern').value) $('flt-pattern').value = `*${leftover}*`;
+
+  state.filterOnlyMatched = true;
+  $('btn-flt-clear-view')?.classList.remove('hidden');
+  updateStudioMatchPreview();
+  applySortAndFilter();
+}
+
+function renderCommandPaletteList(query) {
+  const listEl = $('cmd-palette-list');
+  if (!listEl) return;
+  cmdPaletteEntries = buildCommandPaletteEntries(query);
+  if (cmdPaletteActiveIdx >= cmdPaletteEntries.length) cmdPaletteActiveIdx = 0;
+  listEl.innerHTML = '';
+  if (cmdPaletteEntries.length === 0) {
+    listEl.innerHTML = '<div class="muted-text" style="padding:14px;text-align:center;">Eşleşen komut veya yol bulunamadı</div>';
+    return;
+  }
+  cmdPaletteEntries.forEach((item, idx) => {
+    const row = document.createElement('div');
+    row.className = `cmd-palette-item${idx === cmdPaletteActiveIdx ? ' active' : ''}`;
+    row.innerHTML = `
+      <div class="cmd-palette-item-left">
+        <span>${esc(item.icon)}</span>
+        <span class="cmd-palette-item-title">${esc(item.title)}</span>
+        <span class="cmd-palette-item-sub">${esc(item.sub)}</span>
+      </div>
+      <span class="cmd-palette-badge">${esc(item.badge)}</span>
+    `;
+    row.onclick = () => {
+      $('command-palette-dialog')?.close();
+      item.run();
+    };
+    listEl.appendChild(row);
+  });
+}
+
+function openCommandPalette() {
+  const dlg = $('command-palette-dialog');
+  const inp = $('cmd-palette-input');
+  if (!dlg || !inp) return;
+  cmdPaletteActiveIdx = 0;
+  inp.value = '';
+  renderCommandPaletteList('');
+  if (!dlg.open) dlg.showModal();
+  inp.focus();
+}
+
+function bindCommandPaletteHandlers() {
+  const btn = $('btn-cmd-palette');
+  const inp = $('cmd-palette-input');
+  const dlg = $('command-palette-dialog');
+  if (btn) btn.onclick = openCommandPalette;
+  if (inp) {
+    inp.oninput = () => {
+      cmdPaletteActiveIdx = 0;
+      renderCommandPaletteList(inp.value);
+    };
+    inp.onkeydown = (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (cmdPaletteEntries.length > 0) {
+          cmdPaletteActiveIdx = (cmdPaletteActiveIdx + 1) % cmdPaletteEntries.length;
+          renderCommandPaletteList(inp.value);
+          $('cmd-palette-list')?.children[cmdPaletteActiveIdx]?.scrollIntoView({ block: 'nearest' });
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (cmdPaletteEntries.length > 0) {
+          cmdPaletteActiveIdx = (cmdPaletteActiveIdx - 1 + cmdPaletteEntries.length) % cmdPaletteEntries.length;
+          renderCommandPaletteList(inp.value);
+          $('cmd-palette-list')?.children[cmdPaletteActiveIdx]?.scrollIntoView({ block: 'nearest' });
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const picked = cmdPaletteEntries[cmdPaletteActiveIdx];
+        if (picked) {
+          dlg?.close();
+          picked.run();
+        }
+      }
+    };
+  }
+}
+
+const storyboardUrlCache = new Map();
+function setupHoverVideoStoryboard() {
+  const content = $('virtual-content');
+  if (!content) return;
+  let activeCard = null;
+  let hoverTimer = null;
+  let autoPlayTimer = null;
+  let scrubResumeTimer = null;
+  let abortCtrl = null;
+  let currentFrame = 0;
+
+  const setStripFrame = (card, frameIdx) => {
+    if (!card || !card.isConnected) return;
+    const idx = Math.max(0, Math.min(4, frameIdx | 0));
+    currentFrame = idx;
+    const overlay = card.querySelector('.sb-scrub-overlay');
+    const fill = card.querySelector('.sb-scrub-fill');
+    if (overlay) overlay.style.backgroundPosition = `${idx * 25}% 0%`;
+    if (fill) fill.style.width = `${((idx + 1) / 5) * 100}%`;
+  };
+
+  const startAutoPlay = (card) => {
+    clearInterval(autoPlayTimer);
+    autoPlayTimer = setInterval(() => {
+      if (activeCard !== card || !card.isConnected) {
+        clearInterval(autoPlayTimer);
+        autoPlayTimer = null;
+        return;
+      }
+      setStripFrame(card, (currentFrame + 1) % 5);
+    }, 650);
+  };
+
+  const clearCardOverlay = (card) => {
+    clearTimeout(hoverTimer);
+    hoverTimer = null;
+    clearInterval(autoPlayTimer);
+    autoPlayTimer = null;
+    clearTimeout(scrubResumeTimer);
+    scrubResumeTimer = null;
+    if (abortCtrl) {
+      abortCtrl.abort();
+      abortCtrl = null;
+    }
+    if (card) {
+      card.querySelectorAll('.sb-scrub-overlay, .sb-scrub-bar').forEach((el) => el.remove());
+    }
+    activeCard = null;
+  };
+
+  const showLoadingBar = (previewEl) => {
+    let bar = previewEl.querySelector('.sb-scrub-bar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = 'sb-scrub-bar loading';
+      bar.innerHTML = '<div class="sb-scrub-fill"></div>';
+      previewEl.appendChild(bar);
+    } else {
+      bar.classList.add('loading');
+    }
+    return bar;
+  };
+
+  const showStrip = (card, previewEl, url) => {
+    if (!card || !card.isConnected || activeCard !== card) return;
+    let overlay = previewEl.querySelector('.sb-scrub-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'sb-scrub-overlay';
+      previewEl.appendChild(overlay);
+    }
+    overlay.style.backgroundImage = `url("${url}")`;
+    let bar = previewEl.querySelector('.sb-scrub-bar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = 'sb-scrub-bar';
+      bar.innerHTML = '<div class="sb-scrub-fill"></div>';
+      previewEl.appendChild(bar);
+    } else {
+      bar.classList.remove('loading');
+    }
+    setStripFrame(card, 0);
+    startAutoPlay(card);
+  };
+
+  content.addEventListener('mouseover', (e) => {
+    const card = e.target.closest('.grid-card[data-index]');
+    if (!card || card === activeCard) return;
+    const item = state.viewItems[Number(card.dataset.index)];
+    if (!item || item.category !== 'video') {
+      if (activeCard) clearCardOverlay(activeCard);
+      return;
+    }
+    if (activeCard) clearCardOverlay(activeCard);
+    activeCard = card;
+    const previewEl = card.querySelector('.grid-preview');
+    if (!previewEl) return;
+
+    if (storyboardUrlCache.has(item.path)) {
+      const cached = storyboardUrlCache.get(item.path);
+      if (cached) {
+        showStrip(card, previewEl, cached);
+        return;
+      }
+      storyboardUrlCache.delete(item.path);
+    }
+
+    hoverTimer = setTimeout(async () => {
+      if (activeCard !== card || !card.isConnected) return;
+      const loadBar = showLoadingBar(previewEl);
+      abortCtrl = new AbortController();
+      try {
+        const res = await fetch(`/api/storyboard?path=${encodeURIComponent(item.path)}`, { signal: abortCtrl.signal });
+        if (res.status === 204 || !res.ok) {
+          if (loadBar.isConnected) loadBar.remove();
+          return;
+        }
+        const blob = await res.blob();
+        const objUrl = URL.createObjectURL(blob);
+        if (storyboardUrlCache.size > 120) {
+          const oldestKey = storyboardUrlCache.keys().next().value;
+          const oldUrl = storyboardUrlCache.get(oldestKey);
+          if (oldUrl) URL.revokeObjectURL(oldUrl);
+          storyboardUrlCache.delete(oldestKey);
+        }
+        storyboardUrlCache.set(item.path, objUrl);
+        showStrip(card, previewEl, objUrl);
+      } catch {
+        if (loadBar.isConnected) loadBar.remove();
+      }
+    }, 350);
+  });
+
+  content.addEventListener('mousemove', (e) => {
+    if (!activeCard) return;
+    const overlay = activeCard.querySelector('.sb-scrub-overlay');
+    const previewEl = activeCard.querySelector('.grid-preview');
+    if (!overlay || !previewEl) return;
+    clearInterval(autoPlayTimer);
+    autoPlayTimer = null;
+    clearTimeout(scrubResumeTimer);
+    const rect = previewEl.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(0.999, (e.clientX - rect.left) / Math.max(1, rect.width)));
+    const frameIdx = Math.min(4, Math.floor(ratio * 5));
+    setStripFrame(activeCard, frameIdx);
+    const cardRef = activeCard;
+    scrubResumeTimer = setTimeout(() => {
+      if (activeCard === cardRef && cardRef.isConnected) startAutoPlay(cardRef);
+    }, 1100);
+  });
+
+  content.addEventListener('mouseout', (e) => {
+    if (!activeCard) return;
+    if (e.relatedTarget && activeCard.contains(e.relatedTarget)) return;
+    clearCardOverlay(activeCard);
+  });
+}
+
 async function init() {
   try { loadUiPrefs(); } catch {}
   try { bindEvents(); } catch {}
+  try { bindCommandPaletteHandlers(); } catch {}
+  try { bindDragShelfHandlers(); } catch {}
   try { setupMarqueeSelection(); } catch {}
   try { setupDragAndDrop(); } catch {}
+  try { setupHoverVideoStoryboard(); } catch {}
   try { setupViewportResizeObserver(); } catch {}
   await restoreWindowBounds();
   try { setupWindowBoundsPersistence(); } catch {}
